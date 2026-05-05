@@ -71,7 +71,7 @@ Requires a modern browser with support for:
 
 ## License
 
-[LICENCE](LICENCE)
+[LICENCE](LICENSE)
 
 ## Author
 
