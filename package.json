@@ -1,0 +1,33 @@
+{
+  "name": "midi-audio-player",
+  "version": "1.0.0",
+  "description": "Javascript Midi Audio Player for WebAudioFont",
+  "keywords": [
+    "audio",
+    "player",
+    "midi",
+    "js",
+    "webaudiofont"
+  ],
+  "homepage": "https://github.com/ZmotriN/midi-audio-player#readme",
+  "bugs": {
+    "url": "https://github.com/ZmotriN/midi-audio-player/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZmotriN/midi-audio-player.git"
+  },
+  "license": "MIT",
+  "author": "Maxime Larrivée-Roy",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "bin": {
+    "webaudiofont": "./bin/cli.js"
+  },
+  "dependencies": {
+    "midi-player-js": "^2.0.17"
+  }
+}
