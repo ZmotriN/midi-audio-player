@@ -31,6 +31,27 @@ export default class MidiAudioPlayer {
 	}
 
 
+	async play(content = null) {
+		if(content) await this.#load(content);
+        await this.#audioCtx.resume();
+		await this.#midiPlayer.play();
+	}
+
+
+	async pause() {
+        await this.#midiPlayer.pause();
+        await this.#audioCtx.suspend();
+        await this.#clearActiveNotes();
+	}
+
+	
+    async stop() {
+        await this.#midiPlayer.stop();
+        await this.#audioCtx.suspend();
+        await this.#clearActiveNotes();
+	}
+
+
 	async #endOfFile() {
 		if(typeof this.#opts.onEndFile == 'function') await this.#opts.onEndFile();
 	}
@@ -73,11 +94,7 @@ export default class MidiAudioPlayer {
 
     #clearActiveNotes() {
         if (this.#activeNotes) {
-            this.#activeNotes.forEach((envelope, note) => {
-                if (envelope && envelope.cancel) {
-                    envelope.cancel();
-                }
-            });
+            this.#activeNotes.forEach((envelope, note) => { if (envelope && envelope.cancel) envelope.cancel(); });
             this.#activeNotes.clear();
         }
     }
@@ -87,27 +104,6 @@ export default class MidiAudioPlayer {
 		if(this.#midiPlayer.isPlaying()) this.#midiPlayer.stop();
 		this.#clearActiveNotes();
 		await this.#midiPlayer.loadArrayBuffer(content);
-	}
-
-
-	async play(content = null) {
-		if(content) await this.#load(content);
-        await this.#audioCtx.resume();
-		await this.#midiPlayer.play();
-	}
-
-
-	async pause() {
-        await this.#midiPlayer.pause();
-        await this.#audioCtx.suspend();
-        await this.#clearActiveNotes();
-	}
-
-	
-    async stop() {
-        await this.#midiPlayer.stop();
-        await this.#audioCtx.suspend();
-        await this.#clearActiveNotes();
 	}
 
 }

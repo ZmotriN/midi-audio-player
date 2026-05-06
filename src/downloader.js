@@ -1,34 +1,22 @@
 import fs from 'fs/promises';
 import path from 'path';
 
-/**
- * Télécharge une police audio WebAudioFont et la convertit en JSON
- * @param {string} id - L'ID de la police (ex: "0810_GeneralUserGS_sf2_file")
- * @param {string} filename - Le nom du fichier de sortie (ex: "ma_police.json")
- */
+
 export async function downloadWebAudioFont(id, filename) {
     const cleanFilename = filename.endsWith('.json') ? filename : `${filename}.json`;
-    
     const destPath = path.join(process.cwd(), cleanFilename);
     const url = `https://surikov.github.io/webaudiofontdata/sound/${id}.js`;
 
     try {
         console.log(`📡 Téléchargement de : ${id}...`);
-        
         const response = await fetch(url);
-        
-        if (!response.ok) {
-            throw new Error(`Erreur HTTP: ${response.status} (Vérifiez l'ID)`);
-        }
+        if (!response.ok) throw new Error(`Erreur HTTP: ${response.status} (Vérifiez l'ID)`);
 
         const rawContent = await response.text();
-
         const firstBrace = rawContent.indexOf('{');
         const lastBrace = rawContent.lastIndexOf('}');
 
-        if (firstBrace === -1 || lastBrace === -1) {
-            throw new Error("Format de fichier invalide : structure d'objet introuvable.");
-        }
+        if (firstBrace === -1 || lastBrace === -1) throw new Error("Format de fichier invalide : structure d'objet introuvable.");
 
         const objectString = rawContent.substring(firstBrace, lastBrace + 1);
         const data = new Function(`return ${objectString}`)();
