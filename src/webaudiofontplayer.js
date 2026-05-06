@@ -1,5 +1,3 @@
-
-
 class WebAudioFontChannel {
 
     constructor(audioContext) {
@@ -44,7 +42,7 @@ class WebAudioFontPlayer {
 
     #audioCtx = null;
     #preset = null;
-    
+
     constructor(audioCtx, preset) {
         this.#audioCtx = audioCtx;
         this.#preset = preset;
@@ -59,46 +57,46 @@ class WebAudioFontPlayer {
 
     adjustZone(audioContext, zone) {
         if (zone.buffer) return Promise.resolve(zone);
-            zone.delay = 0;
+        zone.delay = 0;
 
-            if (zone.sample) {
-                const decoded = atob(zone.sample);
-                zone.buffer = audioContext.createBuffer(1, decoded.length / 2, zone.sampleRate);
-                const float32Array = zone.buffer.getChannelData(0);
+        if (zone.sample) {
+            const decoded = atob(zone.sample);
+            zone.buffer = audioContext.createBuffer(1, decoded.length / 2, zone.sampleRate);
+            const float32Array = zone.buffer.getChannelData(0);
 
-                for (let i = 0; i < decoded.length / 2; i++) {
-                    const b1 = decoded.charCodeAt(i * 2) & 0xFF;
-                    const b2 = decoded.charCodeAt(i * 2 + 1) & 0xFF;
-                    let n = (b2 << 8) | b1;
-                    if (n >= 32768) n -= 65536;
-                    float32Array[i] = n / 32768.0;
-                }
-                this.applyZoneParameters(zone);
-                return zone;
-
-            } else if (zone.file) {
-                const decoded = atob(zone.file);
-                const uint8Array = new Uint8Array(decoded.length);
-                for (let i = 0; i < decoded.length; i++) {
-                    uint8Array[i] = decoded.charCodeAt(i);
-                }
-
-                audioContext.decodeAudioData(
-                    uint8Array.buffer,
-                    audioBuffer => {
-                        zone.buffer = audioBuffer;
-                        this.applyZoneParameters(zone);
-                        return zone;
-                    },
-                    error => {
-                        console.error("Erreur de décodage audio:", error);
-                        return false;
-                    }
-                );
-            } else {
-                this.applyZoneParameters(zone);
-                return zone;
+            for (let i = 0; i < decoded.length / 2; i++) {
+                const b1 = decoded.charCodeAt(i * 2) & 0xFF;
+                const b2 = decoded.charCodeAt(i * 2 + 1) & 0xFF;
+                let n = (b2 << 8) | b1;
+                if (n >= 32768) n -= 65536;
+                float32Array[i] = n / 32768.0;
             }
+            this.applyZoneParameters(zone);
+            return zone;
+
+        } else if (zone.file) {
+            const decoded = atob(zone.file);
+            const uint8Array = new Uint8Array(decoded.length);
+            for (let i = 0; i < decoded.length; i++) {
+                uint8Array[i] = decoded.charCodeAt(i);
+            }
+
+            audioContext.decodeAudioData(
+                uint8Array.buffer,
+                audioBuffer => {
+                    zone.buffer = audioBuffer;
+                    this.applyZoneParameters(zone);
+                    return zone;
+                },
+                error => {
+                    console.error("Erreur de décodage audio:", error);
+                    return false;
+                }
+            );
+        } else {
+            this.applyZoneParameters(zone);
+            return zone;
+        }
     };
 
     applyZoneParameters = (zone) => {
@@ -193,6 +191,9 @@ class WebAudioFontPlayer {
         envelope.gain.linearRampToValueAtTime(this.noZeroVolume(0), when + duration + this.afterTime);
     }
 
+
+
+
     findEnvelope(audioContext, target) {
         let envelope = this.envelopes.find(e =>
             e.target === target && audioContext.currentTime > e.when + e.duration + 0.001
@@ -200,17 +201,24 @@ class WebAudioFontPlayer {
 
         if (envelope) {
             if (envelope.audioBufferSourceNode) {
-                try { envelope.audioBufferSourceNode.stop(0); envelope.audioBufferSourceNode.disconnect(); } catch (e) { }
+                try {
+                    envelope.audioBufferSourceNode.stop(0);
+                    envelope.audioBufferSourceNode.disconnect();
+                } catch (e) { }
                 envelope.audioBufferSourceNode = null;
             }
         } else {
             envelope = audioContext.createGain();
+
+            envelope.gain.value = 0;
+
             envelope.target = target;
             envelope.connect(target);
+
             envelope.cancel = () => {
                 if (envelope.when + envelope.duration > audioContext.currentTime) {
                     envelope.gain.cancelScheduledValues(0);
-                    envelope.gain.setTargetAtTime(0.00001, audioContext.currentTime, 0.1);
+                    envelope.gain.setTargetAtTime(this.nearZero, audioContext.currentTime, 0.1);
                     envelope.when = audioContext.currentTime + 0.00001;
                     envelope.duration = 0;
                 }
