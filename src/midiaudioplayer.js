@@ -48,6 +48,7 @@ export default class MidiAudioPlayer {
     async stop() {
         await this.#midiPlayer.stop();
         await this.#audioCtx.suspend();
+        await this.#audioPlayer.cancelQueue();
         await this.#clearActiveNotes();
 	}
 

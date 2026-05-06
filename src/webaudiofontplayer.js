@@ -70,10 +70,10 @@ class WebAudioFontPlayer {
     }
 
 
-    cancelQueue(audioContext) {
+    async cancelQueue() {
         this.#envelopes.forEach(e => {
             e.gain.cancelScheduledValues(0);
-            e.gain.setValueAtTime(this.#nearZero, audioContext.currentTime);
+            e.gain.setValueAtTime(this.#nearZero, this.#audioCtx.currentTime);
             e.when = -1;
             try { e.audioBufferSourceNode?.disconnect(); } catch (e) { }
         });
