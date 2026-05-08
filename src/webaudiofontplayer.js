@@ -1,4 +1,4 @@
-class WebAudioFontPlayer {
+export default class WebAudioFontPlayer {
 
     #audioCtx = null;
     #preset = null;
@@ -83,27 +83,22 @@ class WebAudioFontPlayer {
     #adjustZone(zone) {
         if (zone.buffer) return Promise.resolve(zone);
         zone.delay = 0;
-
         if (zone.sample) {
-            const decoded = atob(zone.sample);
-            zone.buffer = this.#audioCtx.createBuffer(1, decoded.length / 2, zone.sampleRate);
+            const binaryString = atob(zone.sample);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
+            const int16Samples = new Int16Array(bytes.buffer);
+            const numSamples = int16Samples.length;
+            zone.buffer = this.#audioCtx.createBuffer(1, numSamples, zone.sampleRate);
             const float32Array = zone.buffer.getChannelData(0);
-
-            for (let i = 0; i < decoded.length / 2; i++) {
-                const b1 = decoded.charCodeAt(i * 2) & 0xFF;
-                const b2 = decoded.charCodeAt(i * 2 + 1) & 0xFF;
-                let n = (b2 << 8) | b1;
-                if (n >= 32768) n -= 65536;
-                float32Array[i] = n / 32768.0;
-            }
+            for (let i = 0; i < numSamples; i++) float32Array[i] = int16Samples[i] / 32768.0;
             this.#applyZoneParameters(zone);
             return zone;
-
         } else if (zone.file) {
             const decoded = atob(zone.file);
             const uint8Array = new Uint8Array(decoded.length);
             for (let i = 0; i < decoded.length; i++) uint8Array[i] = decoded.charCodeAt(i);
-
             this.#audioCtx.decodeAudioData(
                 uint8Array.buffer,
                 audioBuffer => {
@@ -112,7 +107,7 @@ class WebAudioFontPlayer {
                     return zone;
                 },
                 error => {
-                    console.error("Erreur de décodage audio:", error);
+                    console.error("Audio decoding error:", error);
                     return false;
                 }
             );
@@ -149,20 +144,27 @@ class WebAudioFontPlayer {
         let lastTime = 0;
         let lastVolume = ahdsr[0]?.volume ?? 1;
 
-        for (let i = 0; i < ahdsr.length; i++) {
-            const stage = ahdsr[i];
-            if (stage.duration > 0) {
-                if (stage.duration + lastTime > duration) {
-                    const r = 1 - (stage.duration + lastTime - duration) / stage.duration;
-                    const n = lastVolume - r * (lastVolume - stage.volume);
-                    envelope.gain.linearRampToValueAtTime(this.#noZeroVolume(volume * n), when + duration);
-                    break;
-                }
-                lastTime += stage.duration;
-                lastVolume = stage.volume;
-                envelope.gain.linearRampToValueAtTime(this.#noZeroVolume(volume * lastVolume), when + lastTime);
+        for (const stage of ahdsr) {
+            const { duration: stageDuration, volume: stageVolume } = stage;
+            if (stageDuration <= 0) continue;
+            const remainingTime = duration - lastTime;
+            if (stageDuration > remainingTime) {
+                const ratio = remainingTime / stageDuration;
+                const interpolatedVolume = lastVolume + ratio * (stageVolume - lastVolume);
+                envelope.gain.linearRampToValueAtTime(
+                    this.#noZeroVolume(volume * interpolatedVolume),
+                    when + duration
+                );
+                break;
             }
+            lastTime += stageDuration;
+            lastVolume = stageVolume;
+            envelope.gain.linearRampToValueAtTime(
+                this.#noZeroVolume(volume * lastVolume),
+                when + lastTime
+            );
         }
+
         envelope.gain.linearRampToValueAtTime(this.#noZeroVolume(0), when + duration + this.#afterTime);
     }
 
@@ -198,7 +200,7 @@ class WebAudioFontPlayer {
 
     #findZone(pitch) {
         const zone = this.#preset.zones.findLast(z => pitch >= z.keyRangeLow && pitch <= z.keyRangeHigh + 1);
-        if (zone) this.#adjustZone(this.#audioCtx, zone);
+        if (zone) this.#adjustZone(zone);
         return zone;
     };
 
@@ -260,6 +262,3 @@ class WebAudioFontChannel {
     }
 
 }
-
-
-export default WebAudioFontPlayer;

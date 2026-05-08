@@ -6,10 +6,10 @@ A lightweight JavaScript MIDI audio player built on top of the Web Audio API usi
 
 * MIDI file playback in modern browsers
 * Built on the Web Audio API
-* Uses WebAudioFont for instrument rendering
+* Uses WebAudioFont for preset rendering
 * Lightweight and dependency-minimal
 * Simple programmatic API
-* CLI tool for instrument/font handling
+* CLI tool for preset/font handling
 
 ## Installation
 
@@ -24,13 +24,16 @@ npm install midi-audio-player
 ```js
 import MidiAudioPlayer from 'midi-audio-player';
 
+const response = await fetch('/examples/data/iwillsurvive.mid');
+const buffer = await response.arrayBuffer();
+
 const player = new MidiAudioPlayer({
-	volume: 0.02,
-	instrument: instrumentData,
-	onEndFile: async () => await this.playNextSong()
+  preset: presetData,
+  volume: 0.02,
+  onEndFile: async () => await this.playNextSong()
 });
 
-await player.play('binarycontent');
+player.play(buffer);
 ```
 
 ### Control Playback
@@ -43,17 +46,17 @@ player.stop();
 
 ### Working with AudioContext
 
-Due to browser autoplay restrictions, you should ensure that your AudioContext is resumed after a user interaction:
+Due to browser autoplay restrictions, you should ensure that your AudioContext is resumed after a user interaction.
 
 ## CLI
 
-This package provides a CLI tool for downloading and converting WebAudioFont assets. You need to provide a WebAudioFont ID dans the json file for the destination.
+This package provides a CLI tool for downloading and converting WebAudioFont assets. You need to provide a WebAudioFont ID and the json file for the destination.
 
 ```bash
-webaudiofont 0000_Chaos_sf2_file dest/instrument.json
+webaudiofont 0000_Chaos_sf2_file dest/preset.json
 ```
 
-You can find instruments here: [WebAudioFont](https://github.com/surikov/webaudiofont#catalog-of-instruments)
+You can find presets here: [WebAudioFont](https://github.com/surikov/webaudiofont#catalog-of-instruments)
 
 ## Browser Compatibility
 
@@ -81,6 +84,10 @@ Maxime Larrivée-Roy
 
 [https://github.com/ZmotriN/midi-audio-player](https://github.com/ZmotriN/midi-audio-player)
 
----
 
-If you want, I can also tailor it more toward your Phaser/game use case or add a section comparing it with other MIDI solutions (which can be useful positioning-wise).
+## Changelog
+
+### Version 1.1.0
+* Complete refactor
+* Optimized WebAudioFont handling
+* Change instrument option to preset

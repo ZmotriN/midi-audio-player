@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<link rel="icon" type="image/png" href="./images/favicon.png">
+	<link rel="stylesheet" href="./styles/styles.css">
+	<link rel="stylesheet" href="./styles/hopscotch.min.css">
+	<script src="./scripts/highlight.min.js"></script>
+	<title>MidiAudioPlayer</title>
+</head>
+<body>
+	<header>
+		<h1>MidiAudioPlayer</h1>
+	</header>
+	<main>
+		<section>
+			<h2>MidiAudioPlayer</h2>
+			<p>A lightweight JavaScript MIDI audio player built on top of the Web Audio API using WebAudioFont. This package enables playback of MIDI files directly in the browser with minimal setup and no heavy dependencies.</p>
+		</section>
+
+		<section>
+			<h2>Features</h2>
+			<ul>
+				<li>MIDI file playback in modern browsers</li>
+				<li>Built on the Web Audio API</li>
+				<li>Uses WebAudioFont for preset rendering</li>
+				<li>Lightweight and dependency-minimal</li>
+				<li>Simple programmatic API</li>
+				<li>CLI tool for preset/font handling</li>
+			</ul>
+
+		</section>
+
+		<section>
+			<h2>Installation</h2>
+			<pre><code class="language-shell">npm install midi-audio-player</code></pre>
+		</section>
+
+		<section>
+			<h2>Usage</h2>
+
+			<h3>Basic Example</h3>
+			<pre><code class="language-javascript">
+				import MidiAudioPlayer from &#39;midi-audio-player&#39;;
+
+				const response = await fetch(&#39;/examples/data/iwillsurvive.mid&#39;);  const response = await fetch(&#39;/examples/data/iwillsurvive.mid&#39;);
+				const buffer = await response.arrayBuffer();
+
+				const player = new MidiAudioPlayer({
+				  preset: presetData,
+				  volume: 0.02,
+				  onEndFile: async () =&gt; await this.playNextSong()
+				});
+
+				player.play(buffer);
+			</code></pre>
+			<br>
+
+			<h3>Control Playback</h3>	
+			<pre><code class="language-javascript">
+				player.play();
+				player.pause();
+				player.stop();
+			</code></pre>
+			<br>
+
+			<h3>Working with AudioContext</h3>
+			<p>Due to browser autoplay restrictions, you should ensure that your AudioContext is resumed after a user interaction.</p>
+		</section>
+
+		<section>
+			<h2>CLI</h2>
+			<p>This package provides a CLI tool for downloading and converting WebAudioFont assets. You need to provide a WebAudioFont ID and the json file for the destination.</p>
+			<pre><code class="language-shell">webaudiofont "0000_Chaos_sf2_file" "dest/preset.json"</code></pre>
+			<p>You can find presets here: <a noreferrer noopener target="_blank" href="https://github.com/surikov/webaudiofont#catalog-of-instruments">Srgy Surkv's WebAudioFonts</a></p>
+		</section>
+
+		<section>
+			<h2>Browser Compatibility</h2>
+			<p>Requires a modern browser with support for:</p>
+			<ul>
+				<li>Depends on WebAudioFont instrument quality and availability</li>
+				<li>Not intended for high-fidelity or professional audio rendering</li>
+				<li>First playback may be delayed if the AudioContext is not initialized properly</li>
+			</ul>
+		</section>
+
+		<section>
+			<h2>License</h2>
+			<p><a noreferrer noopener target="_blank" href="https://github.com/ZmotriN/midi-audio-player/blob/main/LICENSE">MIT LICENSE</a></p>
+		</section>
+
+	</main>
+
+	
+	<script type="module">
+		// import MidiAudioPlayer from '../dist/index.js';
+
+		// (async () => {
+		// 	const response = await fetch('/examples/data/iwillsurvive.mid');
+		// 	const buffer = await response.arrayBuffer();
+		// 	const player = new MidiAudioPlayer;
+		// 	// player.play(buffer);
+		// })();
+
+		document.querySelectorAll('code').forEach(elm => elm.textContent = elm.textContent.trim().split("\n").map(row => row.replace(/^\t+/, "")).join("\n"));
+		hljs.highlightAll();
+	</script>
+</body>
+</html>

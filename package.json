@@ -21,13 +21,27 @@
   "author": "Maxime Larrivée-Roy",
   "type": "module",
   "main": "index.js",
+  "module": "./dist/index.js",
+  "unpkg": "./dist/midi-audio-player.min.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "script": "./dist/midi-audio-player.min.js"
+    }
+  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "node scripts/watch.js --build-only",
+    "dev": "node scripts/watch.js",
+    "serve:example": "browser-sync start --server --startPath /examples/ --files \"examples/**/*.html, examples/**/*.css, dist/index.js\""
   },
   "bin": {
     "webaudiofont": "./bin/cli.js"
   },
   "dependencies": {
     "midi-player-js": "^2.0.17"
+  },
+  "devDependencies": {
+    "browser-sync": "^3.0.4",
+    "esbuild": "^0.28.0"
   }
 }

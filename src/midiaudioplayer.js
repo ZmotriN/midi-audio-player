@@ -1,30 +1,28 @@
 import MidiPlayer from 'midi-player-js';
 import WebAudioFontPlayer from "./webaudiofontplayer";
-import DefaultInstrument from "./defaultinstrument.json";
+import DefaultPreset from "./presets/defaultpreset.json";
 
 
-
-export default class MidiAudioPlayer {
+export default class MidiAudioPlayer extends MidiPlayer.Player {
 
 	#audioCtx = null;
-	#midiPlayer = null;
 	#audioPlayer = null;
 	#activeNotes = null;
 
 	#opts = {
-		instrument: DefaultInstrument,
+		preset: DefaultPreset,
         volume: 0.012,
 		onEndFile: null
 	};
 
 
 	constructor(opts = {}) {
+        super(event => this.#handleMidiPipeline(event));
 		this.#opts = { ...this.#opts, ...opts };
         this.#activeNotes = new Map();
 		this.#audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-		this.#audioPlayer = new WebAudioFontPlayer(this.#audioCtx, this.#opts.instrument);
-		this.#midiPlayer = new MidiPlayer.Player(event => this.#handleMidiPipeline(event));
-        this.#midiPlayer.on('endOfFile', async () => {
+		this.#audioPlayer = new WebAudioFontPlayer(this.#audioCtx, this.#opts.preset);
+        this.on('endOfFile', async () => {
 			await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 1)));
 			await this.#endOfFile();
         });
@@ -34,22 +32,21 @@ export default class MidiAudioPlayer {
 	async play(content = null) {
 		if(content) await this.#load(content);
         await this.#audioCtx.resume();
-		await this.#midiPlayer.play();
+		await super.play();
 	}
-
+    
 
 	async pause() {
-        await this.#midiPlayer.pause();
-        await this.#audioCtx.suspend();
+        await super.pause();
         await this.#clearActiveNotes();
+        await this.#audioPlayer.cancelQueue();
 	}
 
 	
     async stop() {
-        await this.#midiPlayer.stop();
-        await this.#audioCtx.suspend();
-        await this.#audioPlayer.cancelQueue();
+        await super.stop();
         await this.#clearActiveNotes();
+        await this.#audioPlayer.cancelQueue();
 	}
 
 
@@ -60,7 +57,7 @@ export default class MidiAudioPlayer {
 
     async #handleMidiPipeline(event) {
         if (event.name !== 'Note on' && event.name !== 'Note off') return;
-        if (!this.#midiPlayer.isPlaying()) return;
+        if (!this.isPlaying()) return;
         if (event.noteNumber === undefined) return;
 
         const now = this.#audioCtx.currentTime;
@@ -102,9 +99,9 @@ export default class MidiAudioPlayer {
 
 
 	async #load(content) {
-		if(this.#midiPlayer.isPlaying()) this.#midiPlayer.stop();
+		if(this.isPlaying()) this.stop();
 		this.#clearActiveNotes();
-		await this.#midiPlayer.loadArrayBuffer(content);
+		await this.loadArrayBuffer(content);
 	}
 
 }

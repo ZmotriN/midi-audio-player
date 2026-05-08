@@ -1,0 +1,167 @@
+
+@import url(https://fonts.googleapis.com/css2?family=Rubik:ital,wght@0,300..900;1,300..900&display=block);
+@import url(https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=block);
+
+
+:root {
+
+	--color-main:     #ffa48d;
+	--color-second:   #fd3c84;
+	--color-third:    #06b6d4;
+
+	--color-hljs1:    #797379;
+	--color-hljs2:    #5c545b;
+	--color-hljs3:    #322931;
+	
+	--color-bg1:      #1f2937;
+	--color-bg2:      #111827;
+	--color-bg3:      #0f172a;
+
+	--font-base:       28;
+	--font-break:      1024;
+	--font-size-base:  calc(var(--font-base) * 1px);
+	--font-size-break: calc(var(--font-break) * 1px);
+	--font-size-resp:  calc(var(--font-base) * 100 / var(--font-break) * 1vw);
+	--font-size:       min(var(--font-size-resp), var(--font-size-base));
+	--font-family:     Rubik;
+	--font-monospace:  JetBrains Mono;
+
+	--logo:            url(../images/logo.svg);
+	--icon-mail:       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%23ffa48d' d='m31.1 1.4-.3-.3V1h-.2c-.2-.2-.3-.2-.5-.2H30l-.6.1-28 16a1.3 1.3 0 0 0 0 2.2l9.3 4.3V30c0 .5.3.9.7 1.1l.6.2c.3 0 .5-.1.7-.3l6-4 8.8 4.1.5.2c.7 0 1.2-.6 1.2-1.2l2-28v-.7zm-7 5.4L11.7 21l-6.9-3.2zM13.3 27.7v-3.1l2.8 1.3zM27 28l-7.7-3.5L14 22 28.5 5.6z'/%3E%3C/svg%3E");
+	--icon-link:       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23ffa48d' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' viewBox='0 0 24 24'%3E%3Cpath d='M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6m4-3h6v6m-11 5L21 3'/%3E%3C/svg%3E");
+
+}
+
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+html {
+	font-size: var(--font-size);
+	font-family: Rubik;
+}
+
+body {
+	position: relative;
+	min-height: 100vh;
+	background-image: linear-gradient(135deg, var(--color-bg1) 0%, var(--color-bg2) 50%, var(--color-bg3) 100%);
+	display: flex;
+	justify-content: top;
+	align-items: center;
+	flex-direction: column;
+	padding-top: 1rem;
+	color: var(--color-main);
+}
+
+header {
+	position: relative;
+	width: 100%;
+	max-width: var(--font-size-break);
+	border-bottom: 0.2rem solid var(--color-third);
+	background-image: var(--logo);
+	background-position: top center;
+	background-size: 95%;
+	background-repeat: no-repeat;
+	aspect-ratio: 130 / 36;
+}
+
+main {
+	position: relative;
+	width: 100%;
+	max-width: var(--font-size-break);
+	display: flex;
+	flex-direction: column;
+	align-items: top;
+	padding: 3rem 1rem;
+	row-gap: 2rem;
+}
+
+h1 {
+	opacity: 0;
+}
+
+h2, h3 {
+	color: var(--color-second);
+	margin-bottom: 1rem;
+}
+
+h3 {
+	margin-top: 1.5rem;
+}
+
+p:not(:last-child) {
+	margin-bottom: 1rem;
+}
+
+p:not(:first-child) {
+	margin-top: 1rem;
+}
+
+
+ul {
+	padding-left: 0;
+	list-style-position: outside;
+	margin-left: 1rem;
+}
+
+li:not(:first-child) {
+	margin-top: 0.3rem;
+}
+
+
+a {
+    color: var(--color-main);
+    font-weight: 500;
+    text-decoration: none;
+    background-image: linear-gradient(var(--color-third), var(--color-third));
+    background-position: bottom;
+    background-repeat: no-repeat;
+    background-size: 100% 15%;
+    transition-duration: 50ms;
+}
+
+a:hover {
+	transition-duration: 200ms;
+	background-size: 100% 100%;
+}
+
+a[target="_blank"]::after {
+	content: '';
+	display: inline-block;
+	width: 1em;
+	aspect-ratio: 1/1;
+	background-image: var(--icon-link);
+	background-position: center;
+	background-size: contain;
+	background-repeat: no-repeat;
+	margin-left: 0.1em;
+}
+
+pre code.hljs {
+	font-size: 0.7rem;
+	font-family: var(--font-monospace);
+	overflow-x: auto;
+	scrollbar-width: thin;
+	scrollbar-color: var(--color-hljs2) var(--color-hljs3);
+}
+
+pre code.hljs::-webkit-scrollbar {
+  height: 0.2rem;
+}
+
+pre code.hljs::-webkit-scrollbar-track {
+  background: var(--color-hljs3);
+  border-radius: 0.1rem;
+}
+
+pre code.hljs::-webkit-scrollbar-thumb {
+  background-color: var(--color-hljs2); 
+  border-radius: 0.1rem;
+  border: 0.05rem solid var(--color-hljs3);
+}
+
+pre code.hljs::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-hljs1)
+}
