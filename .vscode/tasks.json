@@ -14,9 +14,9 @@
 			}
 		},
 		{
-			"label": "Serve: Example",
+			"label": "Serve: Site",
 			"type": "npm",
-			"script": "serve:example",
+			"script": "serve:site",
 			"isBackground": true,
 			"problemMatcher": [],
 			"presentation": {

@@ -6,6 +6,7 @@
     "audio",
     "player",
     "midi",
+    "mid",
     "js",
     "webaudiofont"
   ],
@@ -20,7 +21,7 @@
   "license": "MIT",
   "author": "Maxime Larrivée-Roy",
   "type": "module",
-  "main": "index.js",
+  "main": "./dist/index.js",
   "module": "./dist/index.js",
   "unpkg": "./dist/midi-audio-player.min.js",
   "exports": {
@@ -32,7 +33,7 @@
   "scripts": {
     "build": "node scripts/watch.js --build-only",
     "dev": "node scripts/watch.js",
-    "serve:example": "browser-sync start --server --startPath /examples/ --files \"examples/**/*.html, examples/**/*.css, dist/index.js\""
+    "serve:site": "browser-sync start --server --startPath /site/ --files \"site/**/*.html, site/**/*.css, dist/index.js\""
   },
   "bin": {
     "webaudiofont": "./bin/cli.js"
