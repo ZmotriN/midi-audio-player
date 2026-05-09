@@ -14,8 +14,6 @@ bannerText = bannerText
   .replace('###DATE###', date);
 
 const entryPoint = 'index.js';
-const globalName = 'MidiAudioPlayer';
-
 const isBuildMode = process.argv.includes('--build');
 
 const sharedConfig = {
@@ -34,8 +32,8 @@ const sharedConfig = {
 const formats = [
   { format: 'esm', outfile: 'dist/index.js' },
   { format: 'esm', minify: true, outfile: 'dist/index.mjs' },
-  { format: 'iife', outfile: 'dist/midi-audio-player.js', globalName },
-  { format: 'iife', minify: true, outfile: 'dist/midi-audio-player.min.js', globalName },
+  { format: 'iife', outfile: 'dist/midi-audio-player.js' },
+  { format: 'iife', minify: true, outfile: 'dist/midi-audio-player.min.js' },
 ];
 
 async function run() {

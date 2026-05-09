@@ -8,38 +8,13 @@
 	╚═════╝ ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝ ╚═════╝╚═╝  ╚═╝	
 
 	Version: 1.1.0
-	Généré:  2026-05-09 22:37:49
+	Généré:  2026-05-09 22:49:53
 	Auteur:  Maxime Larrivée-Roy <mlarriveeroy@gmail.com>
 	Github:  https://github.com/ZmotriN/midi-audio-player/
 	Website: https://zmotrin.github.io/midi-audio-player/
 	
 */
-var MidiAudioPlayer = (() => {
-  var __defProp = Object.defineProperty;
-  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-  var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __hasOwnProp = Object.prototype.hasOwnProperty;
-  var __export = (target, all) => {
-    for (var name in all)
-      __defProp(target, name, { get: all[name], enumerable: true });
-  };
-  var __copyProps = (to, from, except, desc) => {
-    if (from && typeof from === "object" || typeof from === "function") {
-      for (let key of __getOwnPropNames(from))
-        if (!__hasOwnProp.call(to, key) && key !== except)
-          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-    }
-    return to;
-  };
-  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-
-  // index.js
-  var index_exports = {};
-  __export(index_exports, {
-    MidiAudioPlayer: () => MidiAudioPlayer,
-    default: () => index_default
-  });
-
+(() => {
   // node_modules/midi-player-js/build/index.browser.js
   function _classCallCheck(instance, Constructor) {
     if (!(instance instanceof Constructor)) {
@@ -1628,6 +1603,5 @@ var MidiAudioPlayer = (() => {
   // index.js
   if (typeof window !== "undefined") window.MidiAudioPlayer = MidiAudioPlayer;
   var index_default = MidiAudioPlayer;
-  return __toCommonJS(index_exports);
 })();
 //# sourceMappingURL=midi-audio-player.js.map

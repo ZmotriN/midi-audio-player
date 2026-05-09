@@ -8,7 +8,7 @@
 	╚═════╝ ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝ ╚═════╝╚═╝  ╚═╝	
 
 	Version: 1.1.0
-	Généré:  2026-05-09 22:37:49
+	Généré:  2026-05-09 22:49:53
 	Auteur:  Maxime Larrivée-Roy <mlarriveeroy@gmail.com>
 	Github:  https://github.com/ZmotriN/midi-audio-player/
 	Website: https://zmotrin.github.io/midi-audio-player/
