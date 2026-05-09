@@ -3,7 +3,8 @@ import WebAudioFontPlayer from "./webaudiofontplayer";
 import DefaultPreset from "./presets/defaultpreset.json";
 
 
-class MidiAudioPlayer extends MidiPlayer.Player {
+
+export default class MidiAudioPlayer extends MidiPlayer.Player {
 
 	#audioCtx = null;
 	#audioPlayer = null;
@@ -106,4 +107,4 @@ class MidiAudioPlayer extends MidiPlayer.Player {
 
 }
 
-export { MidiAudioPlayer };
+// export { MidiAudioPlayer };

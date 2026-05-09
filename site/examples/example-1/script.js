@@ -4,7 +4,8 @@
 	const buffer = await response.arrayBuffer();
 
 
-	document.querySelector('.btn.play').addEventListener('click', () => {
+	document.querySelector('.btn.play').addEventListener('click', e => {
+		e.target.classList.add('active');
 		player.play(buffer);
 	});
 

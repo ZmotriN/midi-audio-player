@@ -1,6 +1,6 @@
 {
   "name": "midi-audio-player",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "description": "Javascript Midi Audio Player for WebAudioFont",
   "keywords": [
     "midi",
@@ -43,7 +43,7 @@
     }
   },
   "scripts": {
-    "build": "node scripts/watch.js --build-only",
+    "build": "node scripts/watch.js --build",
     "dev": "node scripts/watch.js",
     "serve:site": "browser-sync start --server --startPath /site/ --files \"site/**/*.html, site/**/*.css, dist/index.js\"",
     "sass:watch": "sass site/:site/ --no-source-map --watch",

@@ -1,3 +1,20 @@
+/*!
+
+	██████╗ ██╗ █████╗ ███╗   ███╗███████╗████████╗██████╗ ██╗ ██████╗██╗  ██╗
+	██╔══██╗██║██╔══██╗████╗ ████║██╔════╝╚══██╔══╝██╔══██╗██║██╔════╝██║ ██╔╝
+	██║  ██║██║███████║██╔████╔██║█████╗     ██║   ██████╔╝██║██║     █████╔╝
+	██║  ██║██║██╔══██║██║╚██╔╝██║██╔══╝     ██║   ██╔══██╗██║██║     ██╔═██╗
+	██████╔╝██║██║  ██║██║ ╚═╝ ██║███████╗   ██║   ██║  ██║██║╚██████╗██║  ██╗
+	╚═════╝ ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝ ╚═════╝╚═╝  ╚═╝	
+
+	Version: 1.1.0
+	Généré:  2026-05-09 22:37:49
+	Auteur:  Maxime Larrivée-Roy <mlarriveeroy@gmail.com>
+	Github:  https://github.com/ZmotriN/midi-audio-player/
+	Website: https://zmotrin.github.io/midi-audio-player/
+	
+*/
+
 // node_modules/midi-player-js/build/index.browser.js
 function _classCallCheck(instance, Constructor) {
   if (!(instance instanceof Constructor)) {
@@ -1584,9 +1601,10 @@ var MidiAudioPlayer = class extends index.Player {
 };
 
 // index.js
-window.MidiAudioPlayer = MidiAudioPlayer;
+if (typeof window !== "undefined") window.MidiAudioPlayer = MidiAudioPlayer;
 var index_default = MidiAudioPlayer;
 export {
+  MidiAudioPlayer,
   index_default as default
 };
 //# sourceMappingURL=index.js.map

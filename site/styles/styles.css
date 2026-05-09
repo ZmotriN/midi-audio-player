@@ -4,12 +4,12 @@
   --color-main: #ffa48d;
   --color-second: #fd3c84;
   --color-third: #06b6d4;
-  --color-hljs1: rgb(105.3295454545, 96.1704545455, 104.1846590909);
+  --color-hljs1: #696068;
   --color-hljs2: #5c545b;
-  --color-hljs3: rgb(78.6704545455, 71.8295454545, 77.8153409091);
-  --color-bg1: rgb(24.7410714286, 34.9285714286, 56.7589285714);
+  --color-hljs3: #4F484E;
+  --color-bg1: #192339;
   --color-bg2: #111827;
-  --color-bg3: rgb(9.2589285714, 13.0714285714, 21.2410714286);
+  --color-bg3: #090D15;
   --font-base: 28;
   --font-break: 1024;
   --font-size-base: calc(var(--font-base) * 1px);
@@ -185,6 +185,7 @@ pre code.hljs::-webkit-scrollbar-thumb:hover {
 }
 .btn.active {
   cursor: default;
+  pointer-events: none;
 }
 .btn.play {
   background-image: var(--btn-play);

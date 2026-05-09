@@ -1,4 +1,4 @@
-name: Deploy to GitHub Pages (dist)
+name: Deploy to GitHub Pages (site)
 
 on:
   push:
@@ -25,11 +25,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Upload artifact (dist)
-        uses: actions/upload-pages-artifact@v3
+      - name: Upload artifact (site)
+        uses: actions/upload-pages-artifact@v5
         with:
           path: site
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
