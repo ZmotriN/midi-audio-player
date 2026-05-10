@@ -84,10 +84,3 @@ Maxime Larrivée-Roy
 
 [https://github.com/ZmotriN/midi-audio-player](https://github.com/ZmotriN/midi-audio-player)
 
-
-## Changelog
-
-### Version 1.1.0
-* Complete refactor
-* Optimized WebAudioFont handling
-* Change instrument option to preset
