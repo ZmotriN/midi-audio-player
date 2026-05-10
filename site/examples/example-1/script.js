@@ -1,5 +1,6 @@
 (async () => {
-
+	
+	const song = 'https://zmotrin.github.io/midi-audio-player/data/iwillsurvive.mid';
 	const btnplay = document.querySelector('.btn.play');
 	const btnstop = document.querySelector('.btn.stop')
 	const btnpause = document.querySelector('.btn.pause')
@@ -45,11 +46,14 @@
 
 	log("Initializing player...");
 	const player = new MidiAudioPlayer();
+
 	log("Download song...");
-	const response = await fetch('https://zmotrin.github.io/midi-audio-player/data/iwillsurvive.mid');
-	const buffer = await response.arrayBuffer();
+	const response = await fetch(song);
+	
 	log("Loading Buffer...");
-	player.load(buffer);
+	const buffer = await response.arrayBuffer();
+	await player.load(buffer);
+
 	log("Ready!");
 })();
 
