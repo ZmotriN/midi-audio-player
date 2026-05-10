@@ -51,7 +51,15 @@
 
 
 	log("Initializing player...");
-	const player = new MidiAudioPlayer();
+	const player = new MidiAudioPlayer({
+		onEndFile: async () => {
+			[btnpause, btnplay].forEach(btn => {
+				btn.classList.remove('active');
+			});
+			btnstop.classList.add('active');
+			log("End of file");
+		}
+	});
 
 	log("Download song...");
 	const response = await fetch(song);
@@ -61,5 +69,7 @@
 	await player.load(buffer);
 
 	log("Ready!");
+
+
 })();
 

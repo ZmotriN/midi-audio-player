@@ -34,7 +34,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
 		this.#clearActiveNotes();
 		await this.loadArrayBuffer(content);
 	}
-    
+
 
 	async play(content = null) {
 		if(content) await this.load(content);
