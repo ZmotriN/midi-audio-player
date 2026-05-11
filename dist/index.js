@@ -1400,6 +1400,85 @@ var WebAudioFontPlayer = class {
   }
 };
 
+// src/indexeddbstorage.js
+var DB_NAME = "MidiAudioPlayer";
+var STORE_NAME = "KeyValues";
+var DB_VERSION = 1;
+var dbInstance = null;
+async function getDB() {
+  if (dbInstance) return dbInstance;
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME);
+      }
+    };
+    request.onsuccess = (e) => {
+      dbInstance = e.target.result;
+      resolve(dbInstance);
+    };
+    request.onerror = (e) => reject(e.target.error);
+  });
+}
+var indexedDbStorage = {
+  /**
+   * Enregistre une valeur.
+   * Contrairement au localStorage, accepte les objets nativement (pas besoin de stringify).
+   */
+  async setItem(key, value) {
+    const db = await getDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, "readwrite");
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.put(value, key);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  },
+  /**
+   * Récupère une valeur par sa clé.
+   */
+  async getItem(key) {
+    const db = await getDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, "readonly");
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.get(key);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  },
+  /**
+   * Supprime une entrée.
+   */
+  async removeItem(key) {
+    const db = await getDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, "readwrite");
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.delete(key);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  },
+  /**
+   * Vide tout le store.
+   */
+  async clear() {
+    const db = await getDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, "readwrite");
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.clear();
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+};
+var indexeddbstorage_default = indexedDbStorage;
+
 // src/presets/defaultpreset.json
 var defaultpreset_default = {
   zones: [
@@ -1547,7 +1626,7 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
     preset: defaultpreset_default,
     volume: 0.5,
     onEndFile: null,
-    localCache: false,
+    localCache: true,
     presets: null
   };
   constructor(opts = {}) {
@@ -1563,14 +1642,12 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
   }
   async getCatalog() {
     if (this.#catalog) return this.#catalog;
-    const cachedata = this.#opts.localCache ? localStorage.getItem("waf_catalog") : sessionStorage.getItem("waf_catalog");
-    if (cachedata) {
-      this.#catalog = JSON.parse(cachedata);
-    } else {
+    const cachedata = this.#opts.localCache ? await indexeddbstorage_default.getItem("waf_catalog") : null;
+    if (cachedata) this.#catalog = JSON.parse(cachedata);
+    else {
       const response = await fetch(`${_MidiAudioPlayer.ENDPOINT}catalog.json`);
       this.#catalog = await response.json();
-      if (this.#opts.localCache) localStorage.setItem("waf_catalog", JSON.stringify(this.#catalog));
-      else sessionStorage.setItem("waf_catalog", JSON.stringify(this.#catalog));
+      if (this.#opts.localCache) await indexeddbstorage_default.setItem("waf_catalog", JSON.stringify(this.#catalog));
     }
     return this.#catalog;
   }
@@ -1579,6 +1656,13 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
     return catalog.categories;
   }
   async getPreset(id) {
+    const cacheid = `waf_preset_${id}`;
+    const cachedata = this.#opts.localCache ? await indexeddbstorage_default.getItem(cacheid) : null;
+    if (cachedata) return JSON.parse(cachedata);
+    const response = await fetch(`${_MidiAudioPlayer.ENDPOINT}presets/${id}.json`);
+    const preset = await response.json();
+    if (this.#opts.localCache) await indexeddbstorage_default.setItem(cacheid, JSON.stringify(preset));
+    return preset;
   }
   async load(content) {
     if (this.isPlaying()) this.stop();

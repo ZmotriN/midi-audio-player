@@ -1,5 +1,6 @@
 import MidiPlayer from 'midi-player-js';
 import WebAudioFontPlayer from "./webaudiofontplayer";
+import indexedDbStorage from './indexeddbstorage';
 import DefaultPreset from "./presets/defaultpreset.json";
 
 
@@ -38,7 +39,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
 		preset: DefaultPreset,
         volume: 0.5,
 		onEndFile: null,
-        localCache: false,
+        localCache: true,
         presets: null,
 	};
 
@@ -60,14 +61,12 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
 
     async getCatalog() {   
         if(this.#catalog) return this.#catalog;
-        const cachedata = this.#opts.localCache ? localStorage.getItem('waf_catalog') : sessionStorage.getItem('waf_catalog');
-        if (cachedata) {
-            this.#catalog = JSON.parse(cachedata);
-        } else {
+        const cachedata = this.#opts.localCache ? await indexedDbStorage.getItem('waf_catalog') : null;
+        if (cachedata) this.#catalog = JSON.parse(cachedata);
+        else {
             const response = await fetch(`${MidiAudioPlayer.ENDPOINT}catalog.json`);
             this.#catalog = await response.json();
-            if(this.#opts.localCache) localStorage.setItem('waf_catalog', JSON.stringify(this.#catalog));
-            else sessionStorage.setItem('waf_catalog', JSON.stringify(this.#catalog));
+            if(this.#opts.localCache) await indexedDbStorage.setItem('waf_catalog', JSON.stringify(this.#catalog));
         }
         return this.#catalog;
     }
@@ -80,8 +79,13 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
 
 
     async getPreset(id) {
-
-        
+        const cacheid = `waf_preset_${id}`;
+        const cachedata = this.#opts.localCache ? await indexedDbStorage.getItem(cacheid) : null;
+        if (cachedata) return JSON.parse(cachedata);
+        const response = await fetch(`${MidiAudioPlayer.ENDPOINT}presets/${id}.json`);
+        const preset = await response.json();
+        if(this.#opts.localCache) await indexedDbStorage.setItem(cacheid, JSON.stringify(preset));
+        return preset;
     }
 
 

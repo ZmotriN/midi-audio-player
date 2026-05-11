@@ -97,8 +97,13 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 	});
 
 	Object.keys(instruments).forEach(i => {
-		instruments[i].addEventListener('change', async () => {
-			console.log(instruments[i].value);
+		const sel = instruments[i];
+		sel.addEventListener('change', async () => {
+			console.log(sel.value);
+
+			console.log(await player.getPreset(sel.value));
+
+			log(`Loading preset: ${sel.options[sel.selectedIndex].text}`);
 		});
 	});
 
