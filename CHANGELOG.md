@@ -1,5 +1,10 @@
 ## Changelog
 
+### [1.1.3] - Unreleased
+
+#### Changed
+* Normalize volume to a linear 0 to 1 float
+
 
 ### [1.1.2] - 2026-05-10 00:19:40
 
