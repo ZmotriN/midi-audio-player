@@ -1,6 +1,11 @@
 ## Changelog
 
-### [1.1.3] - Unreleased
+### [1.2.0] - Unreleased
+
+#### Added
+* Multi-channel controls
+* Add a catalog of 1400+ presets
+* Add a 10 bands compressor
 
 #### Changed
 * Normalize volume to a linear 0 to 1 float

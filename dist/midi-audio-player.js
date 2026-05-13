@@ -8,7 +8,7 @@
 	╚═╝     ╚═╝╚═╝╚═════╝ ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝ ╚═════╝ ╚═╝     ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝
 
 	Version: 1.1.3
-	Généré:  2026-05-10 22:42:20
+	Généré:  2026-05-12 15:30:36
 	Auteur:  Maxime Larrivée-Roy <mlarriveeroy@gmail.com>
 	Github:  https://github.com/ZmotriN/midi-audio-player/
 	Website: https://zmotrin.github.io/midi-audio-player/
@@ -1215,12 +1215,14 @@
   // src/webaudiofontplayer.js
   var WebAudioFontPlayer = class {
     #audioCtx = null;
+    #compressor = null;
     #preset = null;
     #envelopes = [];
     #afterTime = 0.05;
     #nearZero = 1e-6;
-    constructor(audioCtx, preset) {
+    constructor(audioCtx, compressor, preset) {
       this.#audioCtx = audioCtx;
+      this.#compressor = compressor;
       this.#preset = preset;
       this.#preset.zones.map((zone) => this.#adjustZone(zone));
     }
@@ -1355,7 +1357,7 @@
       }
       envelope.gain.linearRampToValueAtTime(this.#noZeroVolume(0), when + duration + this.#afterTime);
     }
-    #findEnvelope() {
+    #findEnvelope(destinationNode) {
       let envelope = this.#envelopes.find((e) => e.target === this.#audioCtx.destination && this.#audioCtx.currentTime > e.when + e.duration + 1e-3);
       if (envelope) {
         if (envelope.audioBufferSourceNode) {
@@ -1369,8 +1371,9 @@
       } else {
         envelope = this.#audioCtx.createGain();
         envelope.gain.value = 0;
-        envelope.target = this.#audioCtx.destination;
-        envelope.connect(this.#audioCtx.destination);
+        const target = destinationNode || this.#compressor.input;
+        envelope.target = target;
+        envelope.connect(target);
         envelope.cancel = () => {
           if (envelope.when + envelope.duration > this.#audioCtx.currentTime) {
             envelope.gain.cancelScheduledValues(0);
@@ -1397,6 +1400,52 @@
     }
     #numValue(a, b) {
       return typeof a === "number" ? a : b;
+    }
+  };
+
+  // src/audiocompressor.js
+  var AudioCompressor = class {
+    #input = null;
+    #output = null;
+    #audioCtx = null;
+    #limiter = null;
+    #analyser = null;
+    constructor(audioCtx) {
+      this.#audioCtx = audioCtx;
+      this.#input = this.#audioCtx.createGain();
+      let lastNode = this.#input;
+      [32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384].forEach((freq) => {
+        lastNode = this.#bandEqualizer(lastNode, freq);
+        this[`band${freq < 1e3 ? freq : freq / 1024 + "k"}`] = lastNode;
+      });
+      this.#limiter = this.#audioCtx.createDynamicsCompressor();
+      this.#limiter.threshold.setValueAtTime(-20, this.#audioCtx.currentTime);
+      this.#limiter.ratio.setValueAtTime(20, this.#audioCtx.currentTime);
+      this.#limiter.attack.setValueAtTime(0, this.#audioCtx.currentTime);
+      this.#limiter.release.setValueAtTime(0.25, this.#audioCtx.currentTime);
+      this.#analyser = this.#audioCtx.createAnalyser();
+      this.#analyser.fftSize = 256;
+      this.#analyser.smoothingTimeConstant = 0.3;
+      this.#output = this.#audioCtx.createGain();
+      lastNode.connect(this.#limiter);
+      this.#limiter.connect(this.#analyser);
+      this.#analyser.connect(this.#output);
+      this.#output.connect(this.#audioCtx.destination);
+    }
+    get analyser() {
+      return this.#analyser;
+    }
+    get input() {
+      return this.#input;
+    }
+    #bandEqualizer(from, frequency) {
+      const filter = this.#audioCtx.createBiquadFilter();
+      filter.frequency.setTargetAtTime(frequency, 0, 1e-4);
+      filter.type = "peaking";
+      filter.gain.setTargetAtTime(0, 0, 1e-4);
+      filter.Q.setTargetAtTime(1, 0, 1e-4);
+      from.connect(filter);
+      return filter;
     }
   };
 
@@ -1481,6 +1530,7 @@
 
   // src/presets/defaultpreset.json
   var defaultpreset_default = {
+    id: -1,
     zones: [
       {
         midi: 81,
@@ -1600,6 +1650,8 @@
   // src/midiaudioplayer.js
   var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
     static ENDPOINT = "https://zmotrin.github.io/webaudiofontjson/";
+    static DEFAULTPRESET = -1;
+    static CHANNELAUTO = -2;
     static PIANO = 1;
     static BASS = 2;
     static STRINGS = 3;
@@ -1608,6 +1660,7 @@
     #catalog = null;
     #audioCtx = null;
     #activeNotes = null;
+    #compressor = null;
     #players = {
       [_MidiAudioPlayer.PIANO]: null,
       [_MidiAudioPlayer.BASS]: null,
@@ -1615,26 +1668,10 @@
       [_MidiAudioPlayer.GUITAR]: null,
       [_MidiAudioPlayer.DRUM]: null
     };
-    #actives = {
-      [_MidiAudioPlayer.PIANO]: true,
-      [_MidiAudioPlayer.BASS]: true,
-      [_MidiAudioPlayer.STRINGS]: true,
-      [_MidiAudioPlayer.GUITAR]: true,
-      [_MidiAudioPlayer.DRUM]: true
-    };
-    // #channels = {
-    //     "piano":   [MidiAudioPlayer.PIANO],
-    //     "bass":    [MidiAudioPlayer.BASS],
-    //     "strings": [MidiAudioPlayer.STRINGS],
-    //     "guitar":  [MidiAudioPlayer.GUITAR],
-    //     "drum":    [MidiAudioPlayer.DRUM],
-    // };
     #opts = {
-      // preset: DefaultPreset,
-      volume: 0.5,
+      volume: 0.6,
       onEndFile: null,
       localCache: true,
-      // fillDefault: false,
       activeChannels: {
         [_MidiAudioPlayer.PIANO]: true,
         [_MidiAudioPlayer.BASS]: true,
@@ -1643,34 +1680,40 @@
         [_MidiAudioPlayer.DRUM]: true
       },
       presets: {
-        [_MidiAudioPlayer.PIANO]: defaultpreset_default,
-        [_MidiAudioPlayer.BASS]: defaultpreset_default,
-        [_MidiAudioPlayer.STRINGS]: defaultpreset_default,
-        [_MidiAudioPlayer.GUITAR]: defaultpreset_default,
-        [_MidiAudioPlayer.DRUM]: defaultpreset_default
+        [_MidiAudioPlayer.PIANO]: _MidiAudioPlayer.DEFAULTPRESET,
+        [_MidiAudioPlayer.BASS]: _MidiAudioPlayer.DEFAULTPRESET,
+        [_MidiAudioPlayer.STRINGS]: _MidiAudioPlayer.DEFAULTPRESET,
+        [_MidiAudioPlayer.GUITAR]: _MidiAudioPlayer.DEFAULTPRESET,
+        [_MidiAudioPlayer.DRUM]: _MidiAudioPlayer.DEFAULTPRESET
       }
     };
-    constructor(opts = {}) {
+    constructor(opts = {}, onReady = null) {
       super((event) => this.#handleMidiPipeline(event));
       this.#opts = {
         ...this.#opts,
         ...opts,
         activeChannels: {
-          ...this.#opts.activeChannels || {},
+          ...this.#opts.activeChannels,
           ...opts.activeChannels || {}
         },
         presets: {
-          ...this.#opts.presets || {},
+          ...this.#opts.presets,
           ...opts.presets || {}
         }
       };
       this.#activeNotes = /* @__PURE__ */ new Map();
       this.#audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      Object.keys(this.#players).forEach((k) => this.#players[k] = new WebAudioFontPlayer(this.#audioCtx, this.#opts.presets[k]));
+      this.#compressor = new AudioCompressor(this.#audioCtx);
+      this.#preloadPresets(onReady);
       this.on("endOfFile", async () => {
         await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 1)));
         await this.#endOfFile();
       });
+    }
+    async #preloadPresets(onReady = null) {
+      await Promise.all(Object.keys(this.#opts.presets).map(async (k) => this.#opts.presets[k] = await this.getPreset(this.#opts.presets[k])));
+      await Object.keys(this.#players).map(async (k) => this.#players[k] = new WebAudioFontPlayer(this.#audioCtx, this.#compressor, this.#opts.presets[k]));
+      if (typeof onReady == "function") onReady();
     }
     async getCatalog() {
       if (this.#catalog) return this.#catalog;
@@ -1687,18 +1730,25 @@
       return (await this.getCatalog()).categories;
     }
     async getPreset(id) {
-      const cacheid = `waf_preset_${id}`;
-      const cachedata = this.#opts.localCache ? await indexeddbstorage_default.getItem(cacheid) : null;
-      if (cachedata) return JSON.parse(cachedata);
-      const response = await fetch(`${_MidiAudioPlayer.ENDPOINT}presets/${id}.json`);
-      const preset = await response.json();
-      if (this.#opts.localCache) await indexeddbstorage_default.setItem(cacheid, JSON.stringify(preset));
-      return preset;
+      try {
+        if (id == "-1") return defaultpreset_default;
+        if (typeof id === "object") return id;
+        const cacheid = `waf_preset_${id}`;
+        const cachedata = this.#opts.localCache ? await indexeddbstorage_default.getItem(cacheid) : null;
+        if (cachedata) return JSON.parse(cachedata);
+        const response = await fetch(`${_MidiAudioPlayer.ENDPOINT}presets/${id}.json`);
+        const preset = await response.json();
+        if (this.#opts.localCache) await indexeddbstorage_default.setItem(cacheid, JSON.stringify(preset));
+        return preset;
+      } catch (e) {
+        throw new Error(`Invalid preset: ${id}`);
+      }
     }
-    async loadPreset(id) {
+    async loadPreset(id, channel = _MidiAudioPlayer.CHANNELAUTO) {
       const preset = await this.getPreset(id);
-      const player = new WebAudioFontPlayer(this.#audioCtx, preset);
-      this.#players[preset.channel] = player;
+      const player = new WebAudioFontPlayer(this.#audioCtx, this.#compressor, preset);
+      if (channel == _MidiAudioPlayer.CHANNELAUTO) this.#players[preset.channel] = player;
+      else this.#players[channel] = player;
     }
     async load(content) {
       if (this.isPlaying()) this.stop();
@@ -1720,9 +1770,17 @@
       await this.#clearActiveNotes();
       await Promise.all(Object.keys(this.#players).map(async (k) => await this.#players[k]?.cancelQueue()));
     }
-    setActiveChannel(channel, value) {
+    async setActiveChannel(channel, value) {
       this.#opts.activeChannels[channel] = value;
       if (!value) this.#clearChannel(channel);
+    }
+    getRealTimeVolume() {
+      const analyser = this.#compressor.analyser;
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      analyser.getByteFrequencyData(dataArray);
+      let values = 0;
+      for (let i = 0; i < dataArray.length; i++) values += dataArray[i];
+      return values / dataArray.length / 255;
     }
     async #endOfFile() {
       if (typeof this.#opts.onEndFile == "function") await this.#opts.onEndFile();

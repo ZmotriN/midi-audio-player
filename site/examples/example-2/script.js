@@ -1,4 +1,4 @@
-self.create = (tag, classname=null, content=null, attrs={}) => {
+const create = (tag, classname=null, content=null, attrs={}) => {
     const elm = document.createElement(tag);
     if(classname) elm.className = classname;
     if(content) elm.innerHTML = content;
@@ -12,17 +12,15 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 };
 
 
+
+
 (async () => {
-
-
-
-
 	const song = 'https://zmotrin.github.io/midi-audio-player/data/iwillsurvive.mid';
+	
+	const logs = document.querySelector('.logs');
 	const btnplay = document.querySelector('.btn.play');
 	const btnstop = document.querySelector('.btn.stop')
 	const btnpause = document.querySelector('.btn.pause')
-
-	const logs = document.querySelector('.logs');
 
 	const instruments = {};
 	instruments[MidiAudioPlayer.PIANO] = document.querySelector('#channel-piano');
@@ -75,29 +73,37 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
         [MidiAudioPlayer.GUITAR]:  true,
         [MidiAudioPlayer.DRUM]:    true,
 	};
-	Object.keys(channels).forEach(channel => {
-		channels[channel] = localStorage.getItem(`waf_active_${channel}`) === "false" ? false : true;
-	});
+	Object.keys(channels).forEach(channel => channels[channel] = localStorage.getItem(`waf_active_${channel}`) === "false" ? false : true);
 
-
+	const presets = {
+		[MidiAudioPlayer.PIANO]:   localStorage.getItem(`waf_preset_${MidiAudioPlayer.PIANO}`) || -1,
+		[MidiAudioPlayer.BASS]:    localStorage.getItem(`waf_preset_${MidiAudioPlayer.BASS}`) || -1,
+		[MidiAudioPlayer.STRINGS]: localStorage.getItem(`waf_preset_${MidiAudioPlayer.STRINGS}`) || -1,
+		[MidiAudioPlayer.GUITAR]:  localStorage.getItem(`waf_preset_${MidiAudioPlayer.GUITAR}`) || -1,
+		[MidiAudioPlayer.DRUM]:    localStorage.getItem(`waf_preset_${MidiAudioPlayer.DRUM}`) || -1,
+	};
 
 
 	// log("Loading preset...");
 	// const preset =
 // console.log(channels);
-
 	log("Initializing player...");
-	const player = new MidiAudioPlayer({
-		activeChannels: channels,
-		onEndFile: async () => {
-			[btnpause, btnplay].forEach(btn => {
-				btn.classList.remove('active');
-			});
-			btnstop.classList.add('active');
-			log("End of file");
-		}
+	let player = null;
+	await new Promise(resolve => {
+		player = new MidiAudioPlayer({
+			presets: presets,
+			activeChannels: channels,
+			onEndFile: async () => {
+				[btnpause, btnplay].forEach(btn => btn.classList.remove('active'));
+				btnstop.classList.add('active');
+				log("End of file");
+			}
+		}, resolve);
 	});
+	log("Player initialized!");
 
+
+	
 
 	document.querySelectorAll('.channels input[type="checkbox"').forEach(async elm => {
 		const channel = {
@@ -124,7 +130,7 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 			presets.forEach(pre => instruments[category.channel].create('option', null, `${inst.name} ${pre.bank} #${pre.serie + 1}`, { value: pre.id }));
 		});
 	}));
-
+	await Object.keys(presets).map(async channel => instruments[channel].value = presets[channel]);
 	Object.keys(instruments).forEach(i => {
 		const sel = instruments[i];
 		const channel = {
@@ -134,12 +140,10 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 			"channel-guitar":  MidiAudioPlayer.GUITAR,
 			"channel-drum":    MidiAudioPlayer.DRUM,
 		}[sel.id];
-		// elm.selected = channels[channel];
 		sel.addEventListener('change', async () => {
 			log(`Load preset: ${sel.options[sel.selectedIndex].text}`);
-			localStorage.setItem(`waf_preset_${channel}`, sel.options[sel.selectedIndex].text);
-			// // console.log(channel);
-			await player.loadPreset(sel.value);
+			localStorage.setItem(`waf_preset_${channel}`, sel.value);
+			await player.loadPreset(sel.value, channel);
 		});
 	});
 
@@ -153,6 +157,26 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 	await player.load(buffer);
 
 	log("Ready!");
+
+
+
+
+
+	let lastmeter = 0;
+	
+
+	setInterval(async () => {
+		requestAnimationFrame(async () => {
+			const vol = player.getRealTimeVolume();
+			const indic = Math.ceil(vol * 36);
+			if(indic == lastmeter) return;
+			document.querySelectorAll(`.meter svg .meter__bands > .meter__band:nth-last-child(-n + ${indic})`).forEach(async elm => elm.style.opacity = 1);
+			document.querySelectorAll(`.meter svg .meter__bands > .meter__band:nth-last-child(n + ${indic + 1})`).forEach(async elm => elm.style.opacity = 0.3);
+			lastmeter = indic;
+		});	
+	}, 50);
+
+
 
 
 })();

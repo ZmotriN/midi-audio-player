@@ -249,7 +249,7 @@ section:has(.controls) {
 }
 .channels > div input[type=checkbox] {
   --color: var(--color-third);
-  --size: 1.8rem;
+  --size: 1.6rem;
   -webkit-appearance: none;
   -moz-appearance: none;
   appearance: none;
@@ -301,6 +301,22 @@ section:has(.controls) {
   font-style: italic;
   font-weight: bold;
   color: var(--color-third);
+}
+.channels .meter {
+  position: absolute;
+  top: 0;
+  right: -2rem;
+  height: 100%;
+  aspect-ratio: 1/10;
+}
+.channels .meter__background {
+  fill: var(--color-pre);
+}
+.channels .meter__inner {
+  fill: black;
+}
+.channels .meter svg .meter__bands > .meter__band {
+  opacity: 0.3;
 }
 
 .inst {

@@ -1,6 +1,7 @@
 export default class WebAudioFontPlayer {
 
     #audioCtx = null;
+    #compressor = null;
     #preset = null;
 
     #envelopes = [];
@@ -8,8 +9,9 @@ export default class WebAudioFontPlayer {
     #nearZero = 0.000001;
 
 
-    constructor(audioCtx, preset) {
+    constructor(audioCtx, compressor, preset) {
         this.#audioCtx = audioCtx;
+        this.#compressor = compressor;
         this.#preset = preset;
         this.#preset.zones.map(zone => this.#adjustZone(zone));
     }
@@ -169,7 +171,7 @@ export default class WebAudioFontPlayer {
     }
 
 
-    #findEnvelope() {
+    #findEnvelope(destinationNode) {
         let envelope = this.#envelopes.find(e => e.target === this.#audioCtx.destination && this.#audioCtx.currentTime > e.when + e.duration + 0.001);
         if (envelope) {
             if (envelope.audioBufferSourceNode) {
@@ -182,8 +184,16 @@ export default class WebAudioFontPlayer {
         } else {
             envelope = this.#audioCtx.createGain();
             envelope.gain.value = 0;
-            envelope.target = this.#audioCtx.destination;
-            envelope.connect(this.#audioCtx.destination);
+            // envelope.target = this.#audioCtx.destination;
+            // envelope.connect(this.#audioCtx.destination);
+            // envelope.target = destinationNode || this.#audioCtx.destination;
+            // envelope.connect(envelope.target);
+            
+            // Utiliser l'entrée du compresseur si aucun noeud de destination n'est fourni
+            const target = destinationNode || this.#compressor.input; 
+            envelope.target = target;
+            envelope.connect(target);
+            
             envelope.cancel = () => {
                 if (envelope.when + envelope.duration > this.#audioCtx.currentTime) {
                     envelope.gain.cancelScheduledValues(0);
@@ -218,47 +228,6 @@ export default class WebAudioFontPlayer {
 
     #numValue(a, b) {
         return typeof a === "number" ? a : b;
-    }
-
-}
-
-
-class WebAudioFontChannel {
-
-    #input = null;
-    #output = null;
-    #audioCtx = null;
-    #limiter = null;
-
-    constructor(audioCtx) {
-        this.#audioCtx = audioCtx;
-        this.#input = this.#audioCtx.createGain();
-
-        let lastNode = this.#input;
-        [32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384].forEach(freq => {
-            lastNode = this.#bandEqualizer(lastNode, freq);
-            this[`band${freq < 1000 ? freq : (freq / 1024) + 'k'}`] = lastNode;
-        });
-
-        this.#limiter = this.#audioCtx.createDynamicsCompressor();
-        this.#limiter.threshold.setValueAtTime(-3.0, this.#audioCtx.currentTime);
-        this.#limiter.ratio.setValueAtTime(40, this.#audioCtx.currentTime);
-        this.#limiter.attack.setValueAtTime(0.000, this.#audioCtx.currentTime);
-        this.#limiter.release.setValueAtTime(0.25, this.#audioCtx.currentTime);
-        this.#output = this.#audioCtx.createGain();
-        lastNode.connect(this.#limiter);
-        this.#limiter.connect(this.#output);
-    }
-
-
-    #bandEqualizer(from, frequency) {
-        const filter = this.#audioCtx.createBiquadFilter();
-        filter.frequency.setTargetAtTime(frequency, 0, 0.0001);
-        filter.type = "peaking";
-        filter.gain.setTargetAtTime(0, 0, 0.0001);
-        filter.Q.setTargetAtTime(1.0, 0, 0.0001);
-        from.connect(filter);
-        return filter;
     }
 
 }

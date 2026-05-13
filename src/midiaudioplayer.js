@@ -1,5 +1,6 @@
 import MidiPlayer from 'midi-player-js';
 import WebAudioFontPlayer from "./webaudiofontplayer";
+import AudioCompressor from './audiocompressor';
 import indexedDbStorage from './indexeddbstorage';
 import DefaultPreset from "./presets/defaultpreset.json";
 
@@ -7,6 +8,9 @@ import DefaultPreset from "./presets/defaultpreset.json";
 export default class MidiAudioPlayer extends MidiPlayer.Player {
 
     static ENDPOINT = 'https://zmotrin.github.io/webaudiofontjson/';
+
+    static DEFAULTPRESET = -1;
+    static CHANNELAUTO =   -2;
     
     static PIANO =    1;
     static BASS =     2;
@@ -14,10 +18,10 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
     static GUITAR =   4;
     static DRUM =    10;
 
-    #catalog = null;
-
-	#audioCtx = null;
+    #catalog     = null;
+	#audioCtx    = null;
 	#activeNotes = null;
+    #compressor  = null;
 
     #players = {
         [MidiAudioPlayer.PIANO]:   null,
@@ -26,28 +30,12 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         [MidiAudioPlayer.GUITAR]:  null,
         [MidiAudioPlayer.DRUM]:    null,
     };
-    #actives = {
-        [MidiAudioPlayer.PIANO]:   true,
-        [MidiAudioPlayer.BASS]:    true,
-        [MidiAudioPlayer.STRINGS]: true,
-        [MidiAudioPlayer.GUITAR]:  true,
-        [MidiAudioPlayer.DRUM]:    true,
-    };
-    // #channels = {
-    //     "piano":   [MidiAudioPlayer.PIANO],
-    //     "bass":    [MidiAudioPlayer.BASS],
-    //     "strings": [MidiAudioPlayer.STRINGS],
-    //     "guitar":  [MidiAudioPlayer.GUITAR],
-    //     "drum":    [MidiAudioPlayer.DRUM],
-    // };
 
 
 	#opts = {
-		// preset: DefaultPreset,
-        volume: 0.5,
-		onEndFile: null,
+        volume: 0.6,
+        onEndFile: null,
         localCache: true,
-        // fillDefault: false,
         activeChannels: {
             [MidiAudioPlayer.PIANO]:   true,
             [MidiAudioPlayer.BASS]:    true,
@@ -56,33 +44,34 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
             [MidiAudioPlayer.DRUM]:    true,
         },
         presets: {
-            [MidiAudioPlayer.PIANO]:   DefaultPreset,
-            [MidiAudioPlayer.BASS]:    DefaultPreset,
-            [MidiAudioPlayer.STRINGS]: DefaultPreset,
-            [MidiAudioPlayer.GUITAR]:  DefaultPreset,
-            [MidiAudioPlayer.DRUM]:    DefaultPreset,
+            [MidiAudioPlayer.PIANO]:   MidiAudioPlayer.DEFAULTPRESET,
+            [MidiAudioPlayer.BASS]:    MidiAudioPlayer.DEFAULTPRESET,
+            [MidiAudioPlayer.STRINGS]: MidiAudioPlayer.DEFAULTPRESET,
+            [MidiAudioPlayer.GUITAR]:  MidiAudioPlayer.DEFAULTPRESET,
+            [MidiAudioPlayer.DRUM]:    MidiAudioPlayer.DEFAULTPRESET,
         },
 	};
 
 
-	constructor(opts = {}) {
+	constructor(opts = {}, onReady = null) {
         super(event => this.#handleMidiPipeline(event));
         this.#opts = {
             ...this.#opts,
             ...opts,
             activeChannels: {
-                ...(this.#opts.activeChannels || {}),
+                ...this.#opts.activeChannels,
                 ...(opts.activeChannels || {})
             },
             presets: {
-                ...(this.#opts.presets || {}),
+                ...this.#opts.presets,
                 ...(opts.presets || {})
             },
         };
 
         this.#activeNotes = new Map();
 		this.#audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        Object.keys(this.#players).forEach(k => this.#players[k] = new WebAudioFontPlayer(this.#audioCtx, this.#opts.presets[k]));
+        this.#compressor = new AudioCompressor(this.#audioCtx);
+        this.#preloadPresets(onReady);
 
         this.on('endOfFile', async () => {
 			await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 1)));
@@ -90,6 +79,12 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         });
 	}
 
+
+    async #preloadPresets(onReady = null) {
+        await Promise.all(Object.keys(this.#opts.presets).map(async k => this.#opts.presets[k] = await this.getPreset(this.#opts.presets[k])));
+        await Object.keys(this.#players).map(async k => this.#players[k] = new WebAudioFontPlayer(this.#audioCtx, this.#compressor, this.#opts.presets[k]));
+        if(typeof onReady == 'function') onReady();
+    }
 
     async getCatalog() {   
         if(this.#catalog) return this.#catalog;
@@ -110,20 +105,27 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
 
 
     async getPreset(id) {
-        const cacheid = `waf_preset_${id}`;
-        const cachedata = this.#opts.localCache ? await indexedDbStorage.getItem(cacheid) : null;
-        if (cachedata) return JSON.parse(cachedata);
-        const response = await fetch(`${MidiAudioPlayer.ENDPOINT}presets/${id}.json`);
-        const preset = await response.json();
-        if(this.#opts.localCache) await indexedDbStorage.setItem(cacheid, JSON.stringify(preset));
-        return preset;
+        try {
+            if(id == '-1') return DefaultPreset;
+            if(typeof id === 'object') return id;
+            const cacheid = `waf_preset_${id}`;
+            const cachedata = this.#opts.localCache ? await indexedDbStorage.getItem(cacheid) : null;
+            if (cachedata) return JSON.parse(cachedata);
+            const response = await fetch(`${MidiAudioPlayer.ENDPOINT}presets/${id}.json`);
+            const preset = await response.json();
+            if(this.#opts.localCache) await indexedDbStorage.setItem(cacheid, JSON.stringify(preset));
+            return preset;
+        } catch(e) {
+            throw new Error(`Invalid preset: ${id}`);
+        }
     }
 
     
-    async loadPreset(id) {
+    async loadPreset(id, channel = MidiAudioPlayer.CHANNELAUTO) {
         const preset = await this.getPreset(id);
-        const player = new WebAudioFontPlayer(this.#audioCtx, preset);
-        this.#players[preset.channel] = player;
+        const player = new WebAudioFontPlayer(this.#audioCtx, this.#compressor, preset);
+        if(channel == MidiAudioPlayer.CHANNELAUTO) this.#players[preset.channel] = player;
+        else this.#players[channel] = player;
     }
 
 
@@ -155,9 +157,19 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
 	}
     
 
-    setActiveChannel(channel, value) {
+    async setActiveChannel(channel, value) {
         this.#opts.activeChannels[channel] = value;
         if(!value) this.#clearChannel(channel);
+    }
+
+
+    getRealTimeVolume() {
+        const analyser = this.#compressor.analyser;
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(dataArray);
+        let values = 0;
+        for (let i = 0; i < dataArray.length; i++) values += dataArray[i];
+        return (values / dataArray.length / 255);
     }
 
 
