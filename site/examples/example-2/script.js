@@ -15,6 +15,7 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 
 
 (async () => {
+	// const song = 'https://zmotrin.github.io/midi-audio-player/data/nevergonnagiveyouup.mid';
 	const song = 'https://zmotrin.github.io/midi-audio-player/data/iwillsurvive.mid';
 	
 	const logs = document.querySelector('.logs');
@@ -44,10 +45,10 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 	}
 
 
-	btnplay.addEventListener('click', () => {
+	btnplay.addEventListener('click', async () => {
 		[btnpause, btnstop].forEach(btn => btn.classList.remove('active'));
 		btnplay.classList.add('active');
-		player.play();
+		await player.play();
 		log(player.getCurrentTick() ? "Resume" : "Play");
 	});
 
@@ -103,7 +104,9 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 	log("Player initialized!");
 
 
-	
+	const instrumentMap = {};
+
+
 
 	document.querySelectorAll('.channels input[type="checkbox"').forEach(async elm => {
 		const channel = {
@@ -159,22 +162,30 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 	log("Ready!");
 
 
+player.events.forEach(track => {
+    track.forEach(event => {
+        // Le type 12 correspond au changement d'instrument (Program Change)
+        if (event.name === 'Program Change') {
+            // On stocke l'instrument (value) pour chaque canal (channel)
+            instrumentMap[event.channel] = event.value;
+        }
+    });
+});
+
+console.log(instrumentMap);
 
 
-
-	let lastmeter = 0;
-	
-
-	setInterval(async () => {
-		requestAnimationFrame(async () => {
-			const vol = player.getRealTimeVolume();
-			const indic = Math.ceil(vol * 36);
-			if(indic == lastmeter) return;
-			document.querySelectorAll(`.meter svg .meter__bands > .meter__band:nth-last-child(-n + ${indic})`).forEach(async elm => elm.style.opacity = 1);
-			document.querySelectorAll(`.meter svg .meter__bands > .meter__band:nth-last-child(n + ${indic + 1})`).forEach(async elm => elm.style.opacity = 0.3);
-			lastmeter = indic;
-		});	
-	}, 50);
+	// let lastmeter = 0;
+	// setInterval(async () => {
+	// 	requestAnimationFrame(async () => {
+	// 		const vol = player.getRealTimeVolume();
+	// 		const indic = Math.ceil(vol * 36);
+	// 		if(indic == lastmeter) return;
+	// 		document.querySelectorAll(`.meter svg .meter__bands > .meter__band:nth-last-child(-n + ${indic})`).forEach(async elm => elm.style.opacity = 1);
+	// 		document.querySelectorAll(`.meter svg .meter__bands > .meter__band:nth-last-child(n + ${indic + 1})`).forEach(async elm => elm.style.opacity = 0.3);
+	// 		lastmeter = indic;
+	// 	});	
+	// }, 50);
 
 
 
