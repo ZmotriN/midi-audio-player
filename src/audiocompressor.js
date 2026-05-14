@@ -23,7 +23,7 @@ export default class AudioCompressor {
         
         this.#analyser = this.#audioCtx.createAnalyser();
         this.#analyser.fftSize = 256; 
-        this.#analyser.smoothingTimeConstant = 0.3;
+        this.#analyser.smoothingTimeConstant = 0.4;
 
         this.#output = this.#audioCtx.createGain();
 

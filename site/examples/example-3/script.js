@@ -15,8 +15,7 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 
 
 (async () => {
-	// const song = 'https://zmotrin.github.io/midi-audio-player/data/nevergonnagiveyouup.mid';
-	const song = 'https://zmotrin.github.io/midi-audio-player/data/iwillsurvive.mid';
+	const song = '../../data/closer.mid';
 	
 	const logs = document.querySelector('.logs');
 	const btnplay = document.querySelector('.btn.play');
@@ -61,32 +60,99 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 
 
 	log("Initializing player...");
-	let player = null;
-	await new Promise(resolve => {
-		player = new MidiAudioPlayer({
-			presetRandom: true,
-			onEndFile: async () => {
-				[btnpause, btnplay].forEach(btn => btn.classList.remove('active'));
-				btnstop.classList.add('active');
-				log("End of file");
-			}
-		}, resolve);
+	const player = new MidiAudioPlayer({
+		presetRandom: true,
+		presetAuto: true,
+		presets: {
+			// [-1]: '12805_Chaos'
+		}
 	});
+	player.on('endOfFile', async () => {
+		[btnpause, btnplay].forEach(btn => btn.classList.remove('active'));
+		btnstop.classList.add('active');
+
+
+
+		log("End of file");
+	});
+
+
+
+
+
+
+
+
+	
+	const input = document.querySelector('.dbvol__input');
+	const svg = document.querySelector('.dbvol__svg');
+	input.value = 100 - (player.volume * 100);
+	input.addEventListener('input', (e) => {
+		const val = 100 - parseFloat(e.target.value);
+		const railTop = 20;
+		const railBottom = 365;
+		const travelDistance = railBottom - railTop;
+		const newY = railBottom - (val / 100 * travelDistance);
+		svg.style.setProperty('--y', newY + 'px');
+		player.volume = val / 100;
+	});
+	input.dispatchEvent(new Event('input', {bubbles: true, cancelable: false }));
+
+
+
+
+
+
+
+
+	let lastmeter = 0;
+	setInterval(async () => {
+		requestAnimationFrame(async () => {
+			const vol = player.getRealTimeVolume() * 1.5;
+			const indic = Math.ceil(vol * 36);
+			if(indic == lastmeter) return;
+			document.querySelectorAll(`.meter svg .meter__bands > .meter__band:nth-last-child(-n + ${indic})`).forEach(async elm => elm.style.opacity = 1);
+			document.querySelectorAll(`.meter svg .meter__bands > .meter__band:nth-last-child(n + ${indic + 1})`).forEach(async elm => elm.style.opacity = 0.3);
+			lastmeter = indic;
+		});	
+	}, 50);
+
+
+
+
+
+		
+
+		
+
+
+
+
+
+			
+
+
+			
+			
+
+
+
+
+
+
+
+
 	log("Player initialized!");
 
-	// console.log(await player.getCatalog());
 
 	log("Download song...");
 	const response = await fetch(song);
 
 	log("Loading Buffer...");
 	const buffer = await response.arrayBuffer();
-	await player.load(buffer);
-
+	const infos = await player.load(buffer);
+	// console.log(infos);
 	log("Ready!");
-
-
-
 
 })();
 

@@ -7,8 +7,8 @@
 	██║ ╚═╝ ██║██║██████╔╝██║██║  ██║╚██████╔╝██████╔╝██║╚██████╔╝██║     ███████╗██║  ██║   ██║   ███████╗██║  ██║
 	╚═╝     ╚═╝╚═╝╚═════╝ ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝ ╚═════╝ ╚═╝     ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝
 
-	Version: 1.1.3
-	Généré:  2026-05-12 15:30:36
+	Version: 1.2.0
+	Généré:  2026-05-13 22:16:28
 	Auteur:  Maxime Larrivée-Roy <mlarriveeroy@gmail.com>
 	Github:  https://github.com/ZmotriN/midi-audio-player/
 	Website: https://zmotrin.github.io/midi-audio-player/
@@ -1425,7 +1425,7 @@ var AudioCompressor = class {
     this.#limiter.release.setValueAtTime(0.25, this.#audioCtx.currentTime);
     this.#analyser = this.#audioCtx.createAnalyser();
     this.#analyser.fftSize = 256;
-    this.#analyser.smoothingTimeConstant = 0.3;
+    this.#analyser.smoothingTimeConstant = 0.4;
     this.#output = this.#audioCtx.createGain();
     lastNode.connect(this.#limiter);
     this.#limiter.connect(this.#analyser);
@@ -1648,6 +1648,7 @@ var defaultpreset_default = {
 };
 
 // src/midiaudioplayer.js
+var clamp = (num, min, max) => Math.min(Math.max(num, min), max);
 var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
   static ENDPOINT = "https://zmotrin.github.io/webaudiofontjson/";
   static DEFAULTPRESET = -1;
@@ -1658,14 +1659,14 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
   #instruments = {};
   #players = {};
   #opts = {
-    volume: 0.6,
+    volume: 0.7,
     onEndFile: null,
     localCache: true,
     presetAuto: false,
     presetRandom: false,
     presets: { [-1]: -1 }
   };
-  constructor(opts = {}, onReady = null) {
+  constructor(opts = {}) {
     super((event) => this.#handleMidiPipeline(event));
     this.#opts.presets = { ...this.#opts.presets, ...Object.fromEntries(Array.from({ length: 128 }, (_, i) => [i + 1, -1])) };
     this.#opts = {
@@ -1679,14 +1680,22 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
     this.#activeNotes = /* @__PURE__ */ new Map();
     this.#audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     this.#compressor = new AudioCompressor(this.#audioCtx);
-    if (typeof onReady == "function") onReady();
-    this.on("endOfFile", async () => {
-      await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 1)));
-      await this.#endOfFile();
-    });
   }
-  async #preloadPresets(onReady = null) {
-    if (typeof onReady == "function") onReady();
+  get volume() {
+    return this.#opts.volume;
+  }
+  set volume(vol) {
+    this.#opts.volume = clamp(vol, 0, 1);
+  }
+  async triggerPlayerEvent(playerEvent, data) {
+    if (playerEvent == "endOfFile") {
+      requestAnimationFrame(() => setTimeout(() => {
+        super.stop();
+        super.triggerPlayerEvent(playerEvent, data);
+      }, 1));
+    } else {
+      super.triggerPlayerEvent(playerEvent, data);
+    }
   }
   async getCatalog() {
     if (this.#catalog) return this.#catalog;
@@ -1717,12 +1726,6 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
       throw new Error(`Invalid preset: ${id}`);
     }
   }
-  // async loadPreset(id, channel = MidiAudioPlayer.CHANNELAUTO) {
-  //     const preset = await this.getPreset(id);
-  //     const player = new WebAudioFontPlayer(this.#audioCtx, this.#compressor, preset);
-  //     if(channel == MidiAudioPlayer.CHANNELAUTO) this.#players[preset.channel] = player;
-  //     else this.#players[channel] = player;
-  // }
   async load(content) {
     if (this.isPlaying()) this.stop();
     this.#clearActiveNotes();
@@ -1730,17 +1733,13 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
     this.#instruments = await this.#getInstruments();
     await Promise.all(Object.keys(this.#instruments).map(async (channel) => {
       let preset = null;
-      if ((this.#opts.presetAuto || this.#opts.presetRandom) && this.#opts.presets[this.#instruments[channel]] != _MidiAudioPlayer.DEFAULTPRESET) {
-        preset = this.getPreset(this.#opts.presets[this.#instruments[channel]]);
-      } else if (this.#opts.presetRandom) {
-        preset = this.#getRandomPreset(this.#instruments[channel]);
-      } else if (this.#opts.presetAuto) {
-        preset = this.#getAutoPreset(this.#instruments[channel]);
-      } else {
-        preset = this.getPreset(this.#opts.presets[this.#instruments[channel]]);
-      }
+      if ((this.#opts.presetAuto || this.#opts.presetRandom) && this.#opts.presets[this.#instruments[channel]] != _MidiAudioPlayer.DEFAULTPRESET) preset = this.getPreset(this.#opts.presets[this.#instruments[channel]]);
+      else if (this.#opts.presetRandom) preset = this.#getRandomPreset(this.#instruments[channel]);
+      else if (this.#opts.presetAuto) preset = this.#getAutoPreset(this.#instruments[channel]);
+      else preset = this.getPreset(this.#opts.presets[this.#instruments[channel]]);
       this.#players[channel] = await this.#createWebAudioFontPlayer(await preset);
     }));
+    return {};
   }
   async play(content = null) {
     if (content) await this.load(content);
@@ -1757,10 +1756,6 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
     await this.#clearActiveNotes();
     await Promise.all(Object.keys(this.#players).map(async (k) => await this.#players[k]?.cancelQueue()));
   }
-  // async setActiveChannel(channel, value) {
-  //     this.#opts.activeChannels[channel] = value;
-  //     if(!value) this.#clearChannel(channel);
-  // }
   getRealTimeVolume() {
     const analyser = this.#compressor.analyser;
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
