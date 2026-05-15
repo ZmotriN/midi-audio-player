@@ -8,11 +8,23 @@ export default class WebAudioFontPlayer {
     #afterTime = 0.05;
     #nearZero = 0.000001;
 
+    #bendRange = 2;
+
+    #mainGain = null;
+    #sustain = false;
+    #pitchBendValue = 8192;
+    #notesWaitingForSustain = new Set();
+    
 
     constructor(audioCtx, compressor, preset) {
         this.#audioCtx = audioCtx;
         this.#compressor = compressor;
         this.#preset = preset;
+
+        this.#mainGain = this.#audioCtx.createGain();
+        this.#mainGain.gain.setValueAtTime(0.7, this.#audioCtx.currentTime);
+        this.#mainGain.connect(this.#compressor.input);
+
         this.#preset.zones.map(zone => this.#adjustZone(zone));
     }
 
@@ -25,7 +37,9 @@ export default class WebAudioFontPlayer {
         if (!zone?.buffer) return null;
 
         const baseDetune = zone.originalPitch - 100.0 * zone.coarseTune - zone.fineTune;
-        const playbackRate = Math.pow(2, (100.0 * pitch - baseDetune) / 1200.0);
+        const currentBendSemitones = ((this.#pitchBendValue - 8192) / 8192) * this.#bendRange;
+        const playbackRate = Math.pow(2, (100.0 * (pitch + currentBendSemitones) - baseDetune) / 1200.0);
+
         const startWhen = Math.max(when, this.#audioCtx.currentTime);
         let waveDuration = duration + this.#afterTime;
 
@@ -62,6 +76,9 @@ export default class WebAudioFontPlayer {
         envelope.when = startWhen;
         envelope.duration = waveDuration;
 
+        envelope.pitch = pitch;
+        envelope.baseDetune = baseDetune;
+
         return envelope;
     }
 
@@ -79,6 +96,49 @@ export default class WebAudioFontPlayer {
             e.when = -1;
             try { e.audioBufferSourceNode?.disconnect(); } catch (e) { }
         });
+    }
+
+
+    isSustainActive() {
+        return this.#sustain;
+    }
+
+
+    registerSustainNote(cancelFn) {
+        this.#notesWaitingForSustain.add(cancelFn);
+    }
+
+
+    setPitchBend(value) {
+        this.#pitchBendValue = value;
+        const semitones = ((value - 8192) / 8192) * this.#bendRange;
+        const now = this.#audioCtx.currentTime;
+        this.#envelopes.forEach(e => {
+            if (e.audioBufferSourceNode && e.when + e.duration > now) {
+                const originalPitch = e.pitch;
+                const baseDetune = e.baseDetune;
+                const newRate = Math.pow(2, (100.0 * (originalPitch + semitones) - baseDetune) / 1200.0);
+                e.audioBufferSourceNode.playbackRate.setTargetAtTime(newRate, now, 0.05);
+            }
+        });
+    }
+
+
+    setController(number, value) {
+        const now = this.#audioCtx.currentTime;
+        switch (number) {
+            case 7:
+                const vol = value / 127;
+                this.#mainGain.gain.setTargetAtTime(vol, now, 0.05);
+                break;
+            case 64:
+                this.#sustain = value >= 64;
+                if (!this.#sustain) {
+                    this.#notesWaitingForSustain.forEach(cancelFn => cancelFn());
+                    this.#notesWaitingForSustain.clear();
+                }
+                break;
+        }
     }
 
 
@@ -110,6 +170,7 @@ export default class WebAudioFontPlayer {
                 },
                 error => {
                     console.error("Audio decoding error:", error);
+                    console.warning(this.#preset);
                     return false;
                 }
             );
@@ -184,16 +245,9 @@ export default class WebAudioFontPlayer {
         } else {
             envelope = this.#audioCtx.createGain();
             envelope.gain.value = 0;
-            // envelope.target = this.#audioCtx.destination;
-            // envelope.connect(this.#audioCtx.destination);
-            // envelope.target = destinationNode || this.#audioCtx.destination;
-            // envelope.connect(envelope.target);
-            
-            // Utiliser l'entrée du compresseur si aucun noeud de destination n'est fourni
-            const target = destinationNode || this.#compressor.input; 
+            const target = destinationNode || this.#mainGain; 
             envelope.target = target;
             envelope.connect(target);
-            
             envelope.cancel = () => {
                 if (envelope.when + envelope.duration > this.#audioCtx.currentTime) {
                     envelope.gain.cancelScheduledValues(0);

@@ -166,6 +166,10 @@ section {
   position: relative;
 }
 
+main:has(section:first-child .controls) {
+  padding: 1rem 1rem;
+}
+
 section:has(.controls) {
   display: flex;
   justify-content: center;
@@ -182,12 +186,93 @@ section:has(.controls) {
   user-select: none;
   column-gap: 4rem;
   width: 80%;
+  background-color: var(--color-pre);
+  padding: 1rem;
+  border-radius: 0.2rem;
+  transition: filter 200ms, opacity 200ms;
+}
+.controls.disabled .btn {
+  pointer-events: none;
+  filter: saturate(0%);
+  opacity: 0.5;
+}
+
+.waveform {
+  --progress: 0%;
+  --pad: 0.5rem;
+  --time: "0:00";
+  --duration: "0:00";
+  position: relative;
+  width: 80%;
+  padding: var(--pad);
+  background-color: var(--color-pre);
+  user-select: none;
+  border-radius: 0.2rem;
+}
+.waveform.disabled svg {
+  filter: saturate(0%);
+  opacity: 0.5;
+}
+.waveform.disabled {
+  pointer-events: none;
+}
+.waveform__container {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 5/1;
+}
+.waveform__container::before {
+  content: var(--time);
+  position: absolute;
+  display: block;
+  top: 0.2rem;
+  left: 0.2rem;
+  font-size: 0.7rem;
+  font-family: var(--font-monospace);
+  text-shadow: 0 0 0.4rem black, 0 0 0.2rem black, 0 0 0.1rem black;
+  z-index: 10;
+}
+.waveform__container::after {
+  content: var(--duration);
+  display: inline-block;
+  position: absolute;
+  display: block;
+  top: 0.2rem;
+  right: 0.2rem;
+  font-size: 0.7rem;
+  font-family: var(--font-monospace);
+  text-shadow: 0 0 0.4rem black, 0 0 0.2rem black, 0 0 0.1rem black;
+  z-index: 10;
+}
+.waveform__progress {
+  position: absolute;
+  inset: var(--pad);
+}
+.waveform__pointer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--progress);
+  height: 100%;
+  border-right: 0.1rem solid var(--color-second);
+  background-color: rgba(0, 0, 0, 0.167);
+  transition: width 50ms linear;
+}
+.waveform__click {
+  position: absolute;
+  inset: var(--pad);
+  z-index: 20;
+  cursor: pointer;
+}
+.waveform .midiaudioplayer-waveform {
+  stroke: var(--color-third);
+  stroke-width: 2px;
 }
 
 .meter {
   position: absolute;
   top: 0;
-  right: 1rem;
+  right: 0rem;
   height: 100%;
   aspect-ratio: 1/10;
 }
@@ -196,6 +281,16 @@ section:has(.controls) {
 }
 .meter__inner {
   fill: black;
+  opacity: 0.5;
+}
+.meter svg .meter__bands rect:nth-of-type(-n+3) {
+  fill: var(--color-third);
+}
+.meter svg .meter__bands rect:nth-of-type(n+4):nth-of-type(-n+7) {
+  fill: var(--color-second);
+}
+.meter svg .meter__bands rect:nth-last-of-type(-n+29) {
+  fill: var(--color-main);
 }
 .meter svg .meter__bands > .meter__band {
   opacity: 0.3;
@@ -205,7 +300,7 @@ section:has(.controls) {
 .dbvol {
   position: absolute;
   top: 0;
-  left: 1rem;
+  left: 0rem;
   height: 100%;
   aspect-ratio: 1/10;
 }
@@ -250,44 +345,6 @@ section:has(.controls) {
   fill: var(--color-third);
 }
 
-.seek {
-  position: relative;
-  width: 80%;
-  aspect-ratio: 10/1;
-}
-.seek__background {
-  fill: var(--color-pre);
-}
-.seek__inner {
-  fill: black;
-  stroke: var(--color-main);
-}
-.seek__mask {
-  fill: var(--color-second);
-}
-.seek__slider {
-  fill: var(--color-third);
-}
-.seek__input {
-  position: absolute;
-  writing-mode: horizontal-tb;
-  margin: 0;
-  opacity: 0;
-  cursor: pointer;
-  z-index: 2;
-  appearance: none;
-  left: 5%;
-  top: 0;
-  width: 90%;
-  aspect-ratio: 10/1;
-}
-.seek__svg {
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 1;
-}
-
 .logs {
   background-color: var(--color-pre);
   width: 80%;
@@ -295,6 +352,7 @@ section:has(.controls) {
   padding: 0.5rem;
   line-height: 1.2rem;
   white-space: pre-wrap;
+  border-radius: 0.2rem;
 }
 
 .btn {
@@ -332,78 +390,6 @@ section:has(.controls) {
 }
 .btn.pause.active {
   background-image: var(--btn-pause-active);
-}
-
-.channels {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  user-select: none;
-  row-gap: 1rem;
-  width: 80%;
-}
-.channels > div {
-  background-color: var(--color-pre);
-  display: flex;
-  align-items: center;
-  flex-direction: row;
-  column-gap: 0.5rem;
-}
-.channels > div input[type=checkbox] {
-  --color: var(--color-third);
-  --size: 1.6rem;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  appearance: none;
-  position: absolute;
-  left: calc(0px - var(--size) * 1.4);
-  border-radius: 50%;
-  background-size: var(--size);
-  background-position: center;
-  width: var(--size);
-  height: var(--size);
-  border: 0.3rem solid var(--color);
-  transition: 0.1s border linear;
-  vertical-align: middle;
-  cursor: pointer;
-}
-.channels > div input[type=checkbox]:checked {
-  border: calc(var(--size) / 2) solid var(--color);
-}
-.channels > div select {
-  flex: 1;
-  font-size: 1rem;
-  font-family: Rubik;
-  border: none;
-  background-color: var(--color-pre);
-  color: var(--color-main);
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-hljs2) var(--color-hljs3);
-}
-.channels > div select::-webkit-scrollbar {
-  height: 0.2rem;
-}
-.channels > div select::-webkit-scrollbar-track {
-  background: var(--color-hljs3);
-  border-radius: 0.1rem;
-}
-.channels > div select::-webkit-scrollbar-thumb {
-  background-color: var(--color-hljs2);
-  border-radius: 0.1rem;
-  border: 0.05rem solid var(--color-hljs3);
-}
-.channels > div select::-webkit-scrollbar-thumb:hover {
-  background-color: var(--color-hljs1);
-}
-.channels > div select > option {
-  background-color: var(--color-pre);
-  color: var(--color-main);
-}
-.channels > div select > option:disabled {
-  font-style: italic;
-  font-weight: bold;
-  color: var(--color-third);
 }
 
 iframe[src*="codepen.io"] {

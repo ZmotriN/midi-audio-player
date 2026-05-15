@@ -1212,7 +1212,7 @@
     Constants
   };
 
-  // src/webaudiofontplayer.js
+  // src/libraries/webaudiofontplayer.js
   var WebAudioFontPlayer = class {
     #audioCtx = null;
     #compressor = null;
@@ -1220,10 +1220,18 @@
     #envelopes = [];
     #afterTime = 0.05;
     #nearZero = 1e-6;
+    #bendRange = 2;
+    #mainGain = null;
+    #sustain = false;
+    #pitchBendValue = 8192;
+    #notesWaitingForSustain = /* @__PURE__ */ new Set();
     constructor(audioCtx, compressor, preset) {
       this.#audioCtx = audioCtx;
       this.#compressor = compressor;
       this.#preset = preset;
+      this.#mainGain = this.#audioCtx.createGain();
+      this.#mainGain.gain.setValueAtTime(0.7, this.#audioCtx.currentTime);
+      this.#mainGain.connect(this.#compressor.input);
       this.#preset.zones.map((zone) => this.#adjustZone(zone));
     }
     queueWaveTable(when, pitch, duration, volume, slides) {
@@ -1233,7 +1241,8 @@
       const zone = this.#findZone(pitch);
       if (!zone?.buffer) return null;
       const baseDetune = zone.originalPitch - 100 * zone.coarseTune - zone.fineTune;
-      const playbackRate = Math.pow(2, (100 * pitch - baseDetune) / 1200);
+      const currentBendSemitones = (this.#pitchBendValue - 8192) / 8192 * this.#bendRange;
+      const playbackRate = Math.pow(2, (100 * (pitch + currentBendSemitones) - baseDetune) / 1200);
       const startWhen = Math.max(when, this.#audioCtx.currentTime);
       let waveDuration = duration + this.#afterTime;
       const loop = zone.loopStart >= 1 && zone.loopStart < zone.loopEnd;
@@ -1262,6 +1271,8 @@
       envelope.audioBufferSourceNode = source;
       envelope.when = startWhen;
       envelope.duration = waveDuration;
+      envelope.pitch = pitch;
+      envelope.baseDetune = baseDetune;
       return envelope;
     }
     queueChord(prst, w, pchs, d, v, s) {
@@ -1278,6 +1289,41 @@
         } catch (e2) {
         }
       });
+    }
+    isSustainActive() {
+      return this.#sustain;
+    }
+    registerSustainNote(cancelFn) {
+      this.#notesWaitingForSustain.add(cancelFn);
+    }
+    setPitchBend(value) {
+      this.#pitchBendValue = value;
+      const semitones = (value - 8192) / 8192 * this.#bendRange;
+      const now = this.#audioCtx.currentTime;
+      this.#envelopes.forEach((e) => {
+        if (e.audioBufferSourceNode && e.when + e.duration > now) {
+          const originalPitch = e.pitch;
+          const baseDetune = e.baseDetune;
+          const newRate = Math.pow(2, (100 * (originalPitch + semitones) - baseDetune) / 1200);
+          e.audioBufferSourceNode.playbackRate.setTargetAtTime(newRate, now, 0.05);
+        }
+      });
+    }
+    setController(number, value) {
+      const now = this.#audioCtx.currentTime;
+      switch (number) {
+        case 7:
+          const vol = value / 127;
+          this.#mainGain.gain.setTargetAtTime(vol, now, 0.05);
+          break;
+        case 64:
+          this.#sustain = value >= 64;
+          if (!this.#sustain) {
+            this.#notesWaitingForSustain.forEach((cancelFn) => cancelFn());
+            this.#notesWaitingForSustain.clear();
+          }
+          break;
+      }
     }
     #adjustZone(zone) {
       if (zone.buffer) return Promise.resolve(zone);
@@ -1307,6 +1353,7 @@
           },
           (error) => {
             console.error("Audio decoding error:", error);
+            console.warning(this.#preset);
             return false;
           }
         );
@@ -1371,7 +1418,7 @@
       } else {
         envelope = this.#audioCtx.createGain();
         envelope.gain.value = 0;
-        const target = destinationNode || this.#compressor.input;
+        const target = destinationNode || this.#mainGain;
         envelope.target = target;
         envelope.connect(target);
         envelope.cancel = () => {
@@ -1403,40 +1450,77 @@
     }
   };
 
-  // src/audiocompressor.js
+  // src/libraries/audiocompressor.js
   var AudioCompressor = class {
     #input = null;
     #output = null;
     #audioCtx = null;
     #limiter = null;
     #analyser = null;
-    constructor(audioCtx) {
+    #reverbNode = null;
+    #reverbWet = null;
+    #currentReverbLevel = 0;
+    constructor(audioCtx, volume, reverb) {
       this.#audioCtx = audioCtx;
       this.#input = this.#audioCtx.createGain();
       let lastNode = this.#input;
-      [32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384].forEach((freq) => {
+      const frequencies = [32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384];
+      frequencies.forEach((freq) => {
         lastNode = this.#bandEqualizer(lastNode, freq);
-        this[`band${freq < 1e3 ? freq : freq / 1024 + "k"}`] = lastNode;
+        const label = freq < 1e3 ? freq : freq / 1024 + "k";
+        this[`band${label}`] = lastNode;
       });
+      this.#currentReverbLevel = reverb;
+      this.#reverbNode = this.#audioCtx.createConvolver();
+      this.#reverbWet = this.#audioCtx.createGain();
+      this.#reverbWet.gain.setValueAtTime(reverb, this.#audioCtx.currentTime);
+      this.#generateImpulseResponse(1.5, 2);
       this.#limiter = this.#audioCtx.createDynamicsCompressor();
       this.#limiter.threshold.setValueAtTime(-20, this.#audioCtx.currentTime);
       this.#limiter.ratio.setValueAtTime(20, this.#audioCtx.currentTime);
-      this.#limiter.attack.setValueAtTime(0, this.#audioCtx.currentTime);
+      this.#limiter.attack.setValueAtTime(1e-3, this.#audioCtx.currentTime);
       this.#limiter.release.setValueAtTime(0.25, this.#audioCtx.currentTime);
       this.#analyser = this.#audioCtx.createAnalyser();
       this.#analyser.fftSize = 256;
       this.#analyser.smoothingTimeConstant = 0.4;
       this.#output = this.#audioCtx.createGain();
+      this.#output.gain.setValueAtTime(volume, this.#audioCtx.currentTime);
       lastNode.connect(this.#limiter);
-      this.#limiter.connect(this.#analyser);
-      this.#analyser.connect(this.#output);
-      this.#output.connect(this.#audioCtx.destination);
+      lastNode.connect(this.#reverbNode);
+      this.#reverbNode.connect(this.#reverbWet);
+      this.#reverbWet.connect(this.#limiter);
+      this.#limiter.connect(this.#output);
+      this.#output.connect(this.#analyser);
+      this.#analyser.connect(this.#audioCtx.destination);
     }
     get analyser() {
-      return this.#analyser;
+      return this.#analyser || null;
     }
     get input() {
       return this.#input;
+    }
+    get reverb() {
+      return this.#currentReverbLevel;
+    }
+    set reverb(value) {
+      this.#currentReverbLevel = Math.max(0, Math.min(1, value));
+      this.#reverbWet.gain.setTargetAtTime(this.#currentReverbLevel, this.#audioCtx.currentTime, 0.1);
+    }
+    get masterVolume() {
+      return this.#output.gain.value;
+    }
+    set masterVolume(value) {
+      const linearValue = Math.max(0, Math.min(1, value));
+      const logVolume = Math.pow(linearValue, 2);
+      this.#output.gain.setTargetAtTime(logVolume, this.#audioCtx.currentTime, 0.01);
+    }
+    killReverbTail() {
+      const now = this.#audioCtx.currentTime;
+      this.#reverbWet.gain.cancelScheduledValues(now);
+      this.#reverbWet.gain.setValueAtTime(0, now);
+    }
+    restoreReverb() {
+      this.reverb = this.#currentReverbLevel;
     }
     #bandEqualizer(from, frequency) {
       const filter = this.#audioCtx.createBiquadFilter();
@@ -1447,9 +1531,38 @@
       from.connect(filter);
       return filter;
     }
+    // #generateImpulseResponse(duration, decay) {
+    //     const sampleRate = this.#audioCtx.sampleRate;
+    //     const length = sampleRate * duration;
+    //     const impulse = this.#audioCtx.createBuffer(2, length, sampleRate);
+    //     for (let channel = 0; channel < impulse.numberOfChannels; channel++) {
+    //         const data = impulse.getChannelData(channel);
+    //         for (let i = 0; i < length; i++) {
+    //             data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+    //         }
+    //     }
+    //     this.#reverbNode.buffer = impulse;
+    // }
+    #generateImpulseResponse(duration, decay) {
+      const sampleRate = this.#audioCtx.sampleRate;
+      const length = sampleRate * duration;
+      const impulse = this.#audioCtx.createBuffer(2, length, sampleRate);
+      for (let channel = 0; channel < impulse.numberOfChannels; channel++) {
+        const data = impulse.getChannelData(channel);
+        let lastValue = 0;
+        const filterCoef = 0.1;
+        for (let i = 0; i < length; i++) {
+          const whiteNoise = Math.random() * 2 - 1;
+          const envelope = Math.exp(-i / (sampleRate * (duration / decay)));
+          lastValue = whiteNoise * filterCoef + lastValue * (1 - filterCoef);
+          data[i] = lastValue * envelope;
+        }
+      }
+      this.#reverbNode.buffer = impulse;
+    }
   };
 
-  // src/indexeddbstorage.js
+  // src/libraries/indexeddbstorage.js
   var DB_NAME = "MidiAudioPlayer";
   var STORE_NAME = "KeyValues";
   var DB_VERSION = 1;
@@ -1471,11 +1584,7 @@
       request.onerror = (e) => reject(e.target.error);
     });
   }
-  var indexedDbStorage = {
-    /**
-     * Enregistre une valeur.
-     * Contrairement au localStorage, accepte les objets nativement (pas besoin de stringify).
-     */
+  var indexeddbstorage_default = indexedDbStorage = {
     async setItem(key, value) {
       const db = await getDB();
       return new Promise((resolve, reject) => {
@@ -1486,9 +1595,6 @@
         request.onerror = () => reject(request.error);
       });
     },
-    /**
-     * Récupère une valeur par sa clé.
-     */
     async getItem(key) {
       const db = await getDB();
       return new Promise((resolve, reject) => {
@@ -1499,9 +1605,6 @@
         request.onerror = () => reject(request.error);
       });
     },
-    /**
-     * Supprime une entrée.
-     */
     async removeItem(key) {
       const db = await getDB();
       return new Promise((resolve, reject) => {
@@ -1512,9 +1615,6 @@
         request.onerror = () => reject(request.error);
       });
     },
-    /**
-     * Vide tout le store.
-     */
     async clear() {
       const db = await getDB();
       return new Promise((resolve, reject) => {
@@ -1526,7 +1626,6 @@
       });
     }
   };
-  var indexeddbstorage_default = indexedDbStorage;
 
   // src/presets/defaultpreset.json
   var defaultpreset_default = {
@@ -1652,16 +1751,17 @@
   var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
     static ENDPOINT = "https://zmotrin.github.io/webaudiofontjson/";
     static DEFAULTPRESET = -1;
+    static REFERENCE_GAIN = 0.15;
     #catalog = null;
     #audioCtx = null;
-    #activeNotes = null;
     #compressor = null;
-    #instruments = {};
+    #activeNotes = {};
     #players = {};
     #opts = {
       volume: 0.7,
+      reverb: 0,
       onEndFile: null,
-      localCache: true,
+      localCache: false,
       presetAuto: false,
       presetRandom: false,
       presets: { [-1]: -1 }
@@ -1677,31 +1777,28 @@
           ...opts.presets || {}
         }
       };
-      this.#activeNotes = /* @__PURE__ */ new Map();
       this.#audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      this.#compressor = new AudioCompressor(this.#audioCtx);
+      this.#compressor = new AudioCompressor(this.#audioCtx, this.#opts.volume, this.#opts.reverb);
     }
     get volume() {
       return this.#opts.volume;
     }
     set volume(vol) {
       this.#opts.volume = clamp(vol, 0, 1);
+      this.#compressor.masterVolume = this.#opts.volume;
     }
-    async triggerPlayerEvent(playerEvent, data) {
-      if (playerEvent == "endOfFile") {
-        requestAnimationFrame(() => setTimeout(() => {
-          super.stop();
-          super.triggerPlayerEvent(playerEvent, data);
-        }, 1));
-      } else {
-        super.triggerPlayerEvent(playerEvent, data);
-      }
+    get rever() {
+      return this.#compressor.reverb;
+    }
+    set rever(rev) {
+      this.#compressor.reverb = rev;
     }
     async getCatalog() {
       if (this.#catalog) return this.#catalog;
       const cachedata = this.#opts.localCache ? await indexeddbstorage_default.getItem("waf_catalog") : null;
       if (cachedata) this.#catalog = JSON.parse(cachedata);
       else {
+        this.#log(`Downloading catalog...`);
         const response = await fetch(`${_MidiAudioPlayer.ENDPOINT}catalog.json`);
         this.#catalog = await response.json();
         if (this.#opts.localCache) await indexeddbstorage_default.setItem("waf_catalog", JSON.stringify(this.#catalog));
@@ -1718,6 +1815,7 @@
         const cacheid = `waf_preset_${id}`;
         const cachedata = this.#opts.localCache ? await indexeddbstorage_default.getItem(cacheid) : null;
         if (cachedata) return JSON.parse(cachedata);
+        this.#log(`Downloading preset ${id}...`);
         const response = await fetch(`${_MidiAudioPlayer.ENDPOINT}presets/${id}.json`);
         const preset = await response.json();
         if (this.#opts.localCache) await indexeddbstorage_default.setItem(cacheid, JSON.stringify(preset));
@@ -1729,30 +1827,36 @@
     async load(content) {
       if (this.isPlaying()) this.stop();
       this.#clearActiveNotes();
+      this.#log("Loading buffer...");
       await this.loadArrayBuffer(content);
-      this.#instruments = await this.#getInstruments();
-      await Promise.all(Object.keys(this.#instruments).map(async (channel) => {
+      this.#log("Loading instruments...");
+      const instruments = await this.#getInstruments();
+      if (!Object.values(instruments).length) this.#log("Error: no instrument found");
+      if (this.#opts.presetRandom || this.#opts.presetAuto) await this.getCatalog();
+      await Promise.all(Object.keys(instruments).map(async (channel) => {
         let preset = null;
-        if ((this.#opts.presetAuto || this.#opts.presetRandom) && this.#opts.presets[this.#instruments[channel]] != _MidiAudioPlayer.DEFAULTPRESET) preset = this.getPreset(this.#opts.presets[this.#instruments[channel]]);
-        else if (this.#opts.presetRandom) preset = this.#getRandomPreset(this.#instruments[channel]);
-        else if (this.#opts.presetAuto) preset = this.#getAutoPreset(this.#instruments[channel]);
-        else preset = this.getPreset(this.#opts.presets[this.#instruments[channel]]);
-        this.#players[channel] = await this.#createWebAudioFontPlayer(await preset);
+        if ((this.#opts.presetAuto || this.#opts.presetRandom) && this.#opts.presets[instruments[channel]] != _MidiAudioPlayer.DEFAULTPRESET) preset = await this.getPreset(this.#opts.presets[instruments[channel]]);
+        else if (this.#opts.presetRandom) preset = await this.#getRandomPreset(instruments[channel]);
+        else if (this.#opts.presetAuto) preset = await this.#getAutoPreset(instruments[channel]);
+        else preset = await this.getPreset(this.#opts.presets[instruments[channel]]);
+        this.#players[channel] = await this.#createWebAudioFontPlayer(preset);
       }));
-      return {};
+      return true;
     }
     async play(content = null) {
       if (content) await this.load(content);
-      await this.#audioCtx.resume();
+      this.#compressor.restoreReverb();
       return await super.play();
     }
     async pause() {
       await super.pause();
+      this.#compressor.killReverbTail();
       await this.#clearActiveNotes();
       await Promise.all(Object.keys(this.#players).map(async (k) => await this.#players[k]?.cancelQueue()));
     }
     async stop() {
       await super.stop();
+      this.#compressor.killReverbTail();
       await this.#clearActiveNotes();
       await Promise.all(Object.keys(this.#players).map(async (k) => await this.#players[k]?.cancelQueue()));
     }
@@ -1763,6 +1867,89 @@
       let values = 0;
       for (let i = 0; i < dataArray.length; i++) values += dataArray[i];
       return values / dataArray.length / 255;
+    }
+    getSongTimeRemaining() {
+      return this.ticksToSeconds(this.getCurrentTick(), this.totalTicks);
+    }
+    async generateWaveformSVG(samples = 1e3) {
+      if (!this.totalTicks || !this.events) return "";
+      const waveform = new Array(samples).fill(0);
+      const tickInterval = this.totalTicks / samples;
+      this.events.forEach((track) => {
+        track.forEach((event) => {
+          if (event.name === "Note on" && event.velocity > 0) {
+            const idx = Math.floor(event.tick / tickInterval);
+            if (idx < samples) waveform[idx] += event.velocity;
+          }
+        });
+      });
+      const maxAmp = Math.max(...waveform);
+      const normalized = maxAmp > 0 ? waveform.map((v) => v / maxAmp) : waveform;
+      const width = samples;
+      const height = width / 5;
+      const points = normalized.map((val, i) => {
+        const x = i;
+        const y = height - val * height;
+        return `${x},${y.toFixed(2)}`;
+      });
+      const d = `M ${points.join(" L ")}`;
+      return `<svg class="midiaudioplayer-waveform" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" style="background:transparent; display:blockk; width:100%; height:auto;"><path d="${d}" fill="none" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
+    }
+    async extractLyrics() {
+      const structure = { language: "", title: "", paragraphs: [{ lines: [{ blocks: [] }] }] };
+      let currentPara = structure.paragraphs[0];
+      let currentLine = currentPara.lines[0];
+      this.events.forEach((track) => {
+        track.forEach((event) => {
+          if (event.name === "Text Event" || event.name === "Lyric Event") {
+            let text = event.string;
+            if (text.startsWith("@L")) structure.language = text.substring(2);
+            if (text.startsWith("@T")) structure.title += (structure.title ? " / " : "") + text.substring(2);
+            if (text.startsWith("\\")) {
+              const newPara = { tick: event.tick, lines: [{ blocks: [] }] };
+              structure.paragraphs.push(newPara);
+              currentPara = newPara;
+              currentLine = currentPara.lines[0];
+              text = text.substring(1);
+            }
+            if (text.startsWith("/")) {
+              const newLine = { tick: event.tick, blocks: [] };
+              currentPara.lines.push(newLine);
+              currentLine = newLine;
+              text = text.substring(1);
+            }
+            if (!event.tick) return;
+            if (text.length > 0) {
+              currentLine.blocks.push({
+                text,
+                tick: event.tick
+              });
+            }
+          }
+        });
+      });
+      structure.paragraphs = structure.paragraphs.filter((p) => p.lines.some((l) => l.blocks.length > 0));
+      return structure;
+    }
+    async triggerPlayerEvent(playerEvent, data) {
+      if (playerEvent == "fileLoaded") {
+        super.triggerPlayerEvent(playerEvent, {
+          tempo: this.tempo,
+          division: this.division,
+          duration: this.getSongTime(),
+          sampleRate: this.sampleRate,
+          totalTicks: this.totalTicks,
+          totalEvents: this.totalEvents,
+          instruments: await this.#getInstruments()
+        });
+      } else if (playerEvent == "endOfFile") {
+        requestAnimationFrame(() => setTimeout(() => {
+          super.stop();
+          super.triggerPlayerEvent(playerEvent, data);
+        }, 1));
+      } else {
+        super.triggerPlayerEvent(playerEvent, data);
+      }
     }
     async #getInstruments() {
       const instrumentMap = {};
@@ -1799,55 +1986,76 @@
       if (typeof this.#opts.onEndFile == "function") await this.#opts.onEndFile();
     }
     async #handleMidiPipeline(event) {
-      if (event.name !== "Note on" && event.name !== "Note off") return;
+      if (event.tick < this.getCurrentTick() - 100) return;
       if (!this.isPlaying()) return;
-      if (event.noteNumber === void 0) return;
       switch (event.name) {
+        case "Text Event":
+          if (event.string.startsWith("@")) break;
+          if (!event.tick) break;
+          const text = /^[\\\/]/i.test(event.string) ? event.string.substring(1) : event.string;
+          this.triggerPlayerEvent("lyrics", {
+            string: text,
+            tick: event.tick,
+            paragraphe: event.string.startsWith("\\"),
+            line: event.string.startsWith("/")
+          });
+          break;
         case "Note on":
+          if (event.noteNumber === void 0) return;
           if (event.velocity > 0 && event.velocity <= 127) {
-            this.#stopNotePipe(event.noteNumber);
+            this.#stopNote(event.channel, event.noteNumber);
             const normalizedMaster = this.#opts.volume * 100 / 255;
             const masterGain = Math.pow(normalizedMaster, 2);
             const noteVelocityRatio = event.velocity / 127;
-            const finalVol = masterGain * Math.pow(noteVelocityRatio, 2);
+            const finalVol = _MidiAudioPlayer.REFERENCE_GAIN * Math.pow(noteVelocityRatio, 2);
             const envelope = this.#players[event.channel]?.queueWaveTable(0, event.noteNumber, 2, finalVol);
-            if (envelope) {
-              envelope.channel = event.channel;
-              this.#activeNotes.set(event.noteNumber, envelope);
-            }
-          } else {
-            this.#stopNotePipe(event.noteNumber);
-          }
+            if (envelope) this.#addNote(event.channel, event.noteNumber, envelope);
+          } else this.#stopNote(event.channel, event.noteNumber);
           break;
         case "Note off":
-          this.#stopNotePipe(event.noteNumber);
+          if (event.noteNumber === void 0) return;
+          this.#stopNote(event.channel, event.noteNumber);
+          break;
+        case "Controller Change":
+          this.#players[event.channel]?.setController(event.number, event.value);
+          break;
+        case "Pitch Bend":
+          this.#players[event.channel]?.setPitchBend?.(event.value);
+          break;
+        case "Program Change":
           break;
       }
     }
-    #clearChannel(channel) {
-      if (this.#activeNotes) {
-        this.#activeNotes.forEach((envelope, note) => {
-          if (envelope && envelope.cancel && envelope.channel == channel) {
-            envelope.cancel();
-            this.#activeNotes.delete(note);
-          }
-        });
-      }
+    #addNote(channel, note, envelope) {
+      if (!this.#activeNotes[channel]) this.#activeNotes[channel] = /* @__PURE__ */ new Map();
+      this.#activeNotes[channel].set(note, envelope);
     }
-    #stopNotePipe(noteNumber) {
-      const envelope = this.#activeNotes.get(noteNumber);
+    #stopNote(channel, noteNumber) {
+      const player = this.#players[channel];
+      const envelope = this.#activeNotes[channel]?.get(noteNumber);
       if (envelope) {
-        envelope.cancel();
-        this.#activeNotes.delete(noteNumber);
+        if (player && player.isSustainActive()) {
+          player.registerSustainNote(() => {
+            envelope.cancel();
+            this.#activeNotes[channel]?.delete(noteNumber);
+          });
+        } else {
+          envelope.cancel();
+          this.#activeNotes[channel]?.delete(noteNumber);
+        }
       }
     }
     #clearActiveNotes() {
-      if (this.#activeNotes) {
-        this.#activeNotes.forEach((envelope, note) => {
-          if (envelope && envelope.cancel) envelope.cancel();
+      Object.values(this.#activeNotes).map((map) => {
+        map.forEach((envelope, note) => {
+          if (envelope && envelope.cancel) {
+            envelope.cancel();
+          }
         });
-        this.#activeNotes.clear();
-      }
+      });
+    }
+    #log(str) {
+      this.triggerPlayerEvent("logs", str);
     }
   };
 
