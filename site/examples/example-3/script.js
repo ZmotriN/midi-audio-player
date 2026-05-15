@@ -21,7 +21,7 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 
 
 (async () => {
-	const song = '../../data/ikissedagirl.mid';
+	const song = '../../data/enberne.mid';
 
 	const logs = document.querySelector('.logs');
 	const btnplay = document.querySelector('.btn.play');
@@ -72,7 +72,7 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 	const waveform = document.querySelector('.waveform');
 	const player = new MidiAudioPlayer({
 		volume: localStorage.getItem('waf_volume') || 0.7,
-		reverb: 0.15,
+		reverb: 0.2,
 		presetRandom: true,
 		presetAuto: true,
 		localCache: true,
@@ -97,7 +97,6 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 		document.querySelector('.waveform__container').innerHTML = svgCode;
 	});
 	player.on('logs', str => log(str));
-	// player.on('lyrics', block => console.log(block));
 	document.querySelector('.waveform__click').addEventListener('click', async event => {
 		const rect = event.currentTarget.getBoundingClientRect();
 		const x = event.clientX - rect.left;
@@ -124,7 +123,6 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 		localStorage.setItem(`waf_volume`, player.volume);
 	});
 	input.dispatchEvent(new Event('input', {bubbles: true, cancelable: false }));
-
 
 
 	let lasttime = 0;
@@ -161,10 +159,8 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 	const response = await fetch(song);
 	const buffer = await response.arrayBuffer();
 	const infos = await player.load(buffer);
+
 	log("Ready");
-
-	// console.log(await player.extractLyrics());
-
 	document.querySelector('.controls').classList.remove('disabled');
 	document.querySelector('.waveform').classList.remove('disabled');
 })();

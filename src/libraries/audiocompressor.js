@@ -63,6 +63,7 @@ export default class AudioCompressor {
         const logVolume = Math.pow(linearValue, 2); 
         this.#output.gain.setTargetAtTime(logVolume, this.#audioCtx.currentTime, 0.01);
     }
+    
 
     killReverbTail() {
         const now = this.#audioCtx.currentTime;
@@ -87,43 +88,18 @@ export default class AudioCompressor {
     }
 
 
-    // #generateImpulseResponse(duration, decay) {
-    //     const sampleRate = this.#audioCtx.sampleRate;
-    //     const length = sampleRate * duration;
-    //     const impulse = this.#audioCtx.createBuffer(2, length, sampleRate);
-    //     for (let channel = 0; channel < impulse.numberOfChannels; channel++) {
-    //         const data = impulse.getChannelData(channel);
-    //         for (let i = 0; i < length; i++) {
-    //             data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
-    //         }
-    //     }
-    //     this.#reverbNode.buffer = impulse;
-    // }
-
     #generateImpulseResponse(duration, decay) {
         const sampleRate = this.#audioCtx.sampleRate;
         const length = sampleRate * duration;
         const impulse = this.#audioCtx.createBuffer(2, length, sampleRate);
-
         for (let channel = 0; channel < impulse.numberOfChannels; channel++) {
             const data = impulse.getChannelData(channel);
-
-            // On utilise un simple filtre passe-bas itératif (LPF)
             let lastValue = 0;
-            const filterCoef = 0.1; // Plus c'est bas, plus c'est "dark"
-
+            const filterCoef = 0.1;
             for (let i = 0; i < length; i++) {
-                // 1. Génération du bruit blanc
                 const whiteNoise = (Math.random() * 2 - 1);
-
-                // 2. Application de l'enveloppe exponentielle
-                // On utilise Math.exp pour une décroissance plus naturelle
                 const envelope = Math.exp(-i / (sampleRate * (duration / decay)));
-
-                // 3. Filtre rudimentaire pour adoucir les hautes fréquences
-                // Ça simule l'absorption des murs
                 lastValue = (whiteNoise * filterCoef) + (lastValue * (1 - filterCoef));
-
                 data[i] = lastValue * envelope;
             }
         }

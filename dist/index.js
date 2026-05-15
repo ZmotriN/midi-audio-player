@@ -1234,6 +1234,13 @@ var WebAudioFontPlayer = class {
     this.#mainGain.connect(this.#compressor.input);
     this.#preset.zones.map((zone) => this.#adjustZone(zone));
   }
+  get preset() {
+    return this.#preset;
+  }
+  set preset(preset) {
+    this.#preset = preset;
+    this.#preset.zones.map((zone) => this.#adjustZone(zone));
+  }
   queueWaveTable(when, pitch, duration, volume, slides) {
     if (this.#audioCtx.state === "suspended") this.#audioCtx.resume().catch(() => {
     });
@@ -1274,10 +1281,6 @@ var WebAudioFontPlayer = class {
     envelope.pitch = pitch;
     envelope.baseDetune = baseDetune;
     return envelope;
-  }
-  queueChord(prst, w, pchs, d, v, s) {
-    const vol = this.#limitVolume(v);
-    return pchs.map((p, i) => this.queueWaveTable(this.#audioCtx, this.#audioCtx.destination, prst, w, p, d, vol - Math.random() * 0.01, s?.[i])).filter(Boolean);
   }
   async cancelQueue() {
     this.#envelopes.forEach((e) => {
@@ -1531,18 +1534,6 @@ var AudioCompressor = class {
     from.connect(filter);
     return filter;
   }
-  // #generateImpulseResponse(duration, decay) {
-  //     const sampleRate = this.#audioCtx.sampleRate;
-  //     const length = sampleRate * duration;
-  //     const impulse = this.#audioCtx.createBuffer(2, length, sampleRate);
-  //     for (let channel = 0; channel < impulse.numberOfChannels; channel++) {
-  //         const data = impulse.getChannelData(channel);
-  //         for (let i = 0; i < length; i++) {
-  //             data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
-  //         }
-  //     }
-  //     this.#reverbNode.buffer = impulse;
-  // }
   #generateImpulseResponse(duration, decay) {
     const sampleRate = this.#audioCtx.sampleRate;
     const length = sampleRate * duration;
@@ -1756,6 +1747,7 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
   #audioCtx = null;
   #compressor = null;
   #activeNotes = {};
+  #instruments = {};
   #players = {};
   #opts = {
     volume: 0.7,
@@ -1830,16 +1822,21 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
     this.#log("Loading buffer...");
     await this.loadArrayBuffer(content);
     this.#log("Loading instruments...");
+    this.#instruments = {};
     const instruments = await this.#getInstruments();
+    const uniqueInstruments = await this.#getUniqueInstruments();
     if (!Object.values(instruments).length) this.#log("Error: no instrument found");
     if (this.#opts.presetRandom || this.#opts.presetAuto) await this.getCatalog();
-    await Promise.all(Object.keys(instruments).map(async (channel) => {
+    await Promise.all([...uniqueInstruments].map(async (program) => {
       let preset = null;
-      if ((this.#opts.presetAuto || this.#opts.presetRandom) && this.#opts.presets[instruments[channel]] != _MidiAudioPlayer.DEFAULTPRESET) preset = await this.getPreset(this.#opts.presets[instruments[channel]]);
-      else if (this.#opts.presetRandom) preset = await this.#getRandomPreset(instruments[channel]);
-      else if (this.#opts.presetAuto) preset = await this.#getAutoPreset(instruments[channel]);
-      else preset = await this.getPreset(this.#opts.presets[instruments[channel]]);
-      this.#players[channel] = await this.#createWebAudioFontPlayer(preset);
+      if ((this.#opts.presetAuto || this.#opts.presetRandom) && this.#opts.presets[program] != _MidiAudioPlayer.DEFAULTPRESET) preset = await this.getPreset(this.#opts.presets[program]);
+      else if (this.#opts.presetRandom) preset = await this.#getRandomPreset(program);
+      else if (this.#opts.presetAuto) preset = await this.#getAutoPreset(program);
+      else preset = await this.getPreset(this.#opts.presets[program]);
+      this.#instruments[program] = preset;
+    }));
+    await Promise.all(Object.keys(instruments).map(async (channel) => {
+      this.#players[channel] = await this.#createWebAudioFontPlayer(this.#instruments[instruments[channel]]);
     }));
     return true;
   }
@@ -1854,9 +1851,9 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
     await this.#clearActiveNotes();
     await Promise.all(Object.keys(this.#players).map(async (k) => await this.#players[k]?.cancelQueue()));
   }
-  async stop() {
+  async stop(skipKill = false) {
     await super.stop();
-    this.#compressor.killReverbTail();
+    if (!skipKill) this.#compressor.killReverbTail();
     await this.#clearActiveNotes();
     await Promise.all(Object.keys(this.#players).map(async (k) => await this.#players[k]?.cancelQueue()));
   }
@@ -1893,7 +1890,7 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
       return `${x},${y.toFixed(2)}`;
     });
     const d = `M ${points.join(" L ")}`;
-    return `<svg class="midiaudioplayer-waveform" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" style="background:transparent; display:blockk; width:100%; height:auto;"><path d="${d}" fill="none" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
+    return `<svg class="midiaudioplayer-waveform" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none"><path d="${d}" fill="none" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
   }
   async extractLyrics() {
     const structure = { language: "", title: "", paragraphs: [{ lines: [{ blocks: [] }] }] };
@@ -1944,7 +1941,7 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
       });
     } else if (playerEvent == "endOfFile") {
       requestAnimationFrame(() => setTimeout(() => {
-        super.stop();
+        super.stop(true);
         super.triggerPlayerEvent(playerEvent, data);
       }, 1));
     } else {
@@ -1956,8 +1953,20 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
     this.events.forEach((track) => {
       track.forEach((event) => {
         if (event.name === "Program Change") {
-          if (event.channel == 10) instrumentMap[event.channel] = -1;
+          if (instrumentMap[event.channel]) return;
+          else if (event.channel == 10) instrumentMap[event.channel] = -1;
           else instrumentMap[event.channel] = event.value + 1;
+        }
+      });
+    });
+    return instrumentMap;
+  }
+  async #getUniqueInstruments() {
+    const instrumentMap = /* @__PURE__ */ new Set();
+    this.events.forEach((track) => {
+      track.forEach((event) => {
+        if (event.name === "Program Change") {
+          instrumentMap.add(event.channel == 10 ? -1 : event.value + 1);
         }
       });
     });
@@ -1986,7 +1995,6 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
     if (typeof this.#opts.onEndFile == "function") await this.#opts.onEndFile();
   }
   async #handleMidiPipeline(event) {
-    if (event.tick < this.getCurrentTick() - 100) return;
     if (!this.isPlaying()) return;
     switch (event.name) {
       case "Text Event":
@@ -2001,6 +2009,7 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
         });
         break;
       case "Note on":
+        if (event.tick < this.getCurrentTick() - 10) return;
         if (event.noteNumber === void 0) return;
         if (event.velocity > 0 && event.velocity <= 127) {
           this.#stopNote(event.channel, event.noteNumber);
@@ -2013,6 +2022,7 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
         } else this.#stopNote(event.channel, event.noteNumber);
         break;
       case "Note off":
+        if (event.tick < this.getCurrentTick() - 100) return;
         if (event.noteNumber === void 0) return;
         this.#stopNote(event.channel, event.noteNumber);
         break;
@@ -2023,6 +2033,11 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
         this.#players[event.channel]?.setPitchBend?.(event.value);
         break;
       case "Program Change":
+        if (event.channel == 10) break;
+        if (!this.#opts.presetAuto && !this.#opts.presetRandom) break;
+        if (this.#players[event.channel].preset.program != event.value + 1) {
+          this.#players[event.channel].preset = this.#instruments[event.value + 1];
+        }
         break;
     }
   }

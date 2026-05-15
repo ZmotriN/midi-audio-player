@@ -16,6 +16,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
 	#audioCtx    = null;
 	#compressor  = null;
     #activeNotes = {};
+    #instruments = {};
     #players     = {};
 
 	#opts = {
@@ -48,7 +49,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
     set volume(vol) { this.#opts.volume = clamp(vol, 0, 1); this.#compressor.masterVolume = this.#opts.volume; }
     get rever() { return this.#compressor.reverb; }
     set rever(rev) { this.#compressor.reverb = rev; }
-    
+
 
     async getCatalog() {
         if(this.#catalog) return this.#catalog;
@@ -93,16 +94,21 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
 		this.#log('Loading buffer...');
         await this.loadArrayBuffer(content);
         this.#log('Loading instruments...');
+        this.#instruments = {};
         const instruments = await this.#getInstruments();
+        const uniqueInstruments = await this.#getUniqueInstruments();
         if(!Object.values(instruments).length) this.#log("Error: no instrument found");
         if(this.#opts.presetRandom || this.#opts.presetAuto) await this.getCatalog();
-        await Promise.all(Object.keys(instruments).map(async channel => {
+        await Promise.all([...uniqueInstruments].map(async program => {
             let preset = null;
-            if((this.#opts.presetAuto || this.#opts.presetRandom) && this.#opts.presets[instruments[channel]] != MidiAudioPlayer.DEFAULTPRESET) preset = await this.getPreset(this.#opts.presets[instruments[channel]]);
-            else if(this.#opts.presetRandom) preset = await this.#getRandomPreset(instruments[channel]);
-            else if(this.#opts.presetAuto) preset = await this.#getAutoPreset(instruments[channel]);
-            else preset = await this.getPreset(this.#opts.presets[instruments[channel]]);
-            this.#players[channel] = await this.#createWebAudioFontPlayer(preset);
+            if((this.#opts.presetAuto || this.#opts.presetRandom) && this.#opts.presets[program] != MidiAudioPlayer.DEFAULTPRESET) preset = await this.getPreset(this.#opts.presets[program]);
+            else if(this.#opts.presetRandom) preset = await this.#getRandomPreset(program);
+            else if(this.#opts.presetAuto) preset = await this.#getAutoPreset(program);
+            else preset = await this.getPreset(this.#opts.presets[program]);
+            this.#instruments[program] = preset;
+        }));
+        await Promise.all(Object.keys(instruments).map(async channel => {
+            this.#players[channel] = await this.#createWebAudioFontPlayer(this.#instruments[instruments[channel]]);
         }));
         return true;
 	}
@@ -123,9 +129,9 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
 	}
 
 
-    async stop() {
+    async stop(skipKill = false) {
         await super.stop();
-        this.#compressor.killReverbTail();
+        if(!skipKill) this.#compressor.killReverbTail();
         await this.#clearActiveNotes();
         await Promise.all(Object.keys(this.#players).map(async k => await this.#players[k]?.cancelQueue()));
 	}
@@ -168,7 +174,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
             return `${x},${y.toFixed(2)}`;
         });
         const d = `M ${points.join(' L ')}`;
-        return `<svg class="midiaudioplayer-waveform" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" style="background:transparent; display:blockk; width:100%; height:auto;"><path d="${d}" fill="none" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
+        return `<svg class="midiaudioplayer-waveform" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none"><path d="${d}" fill="none" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
     }
 
 
@@ -223,7 +229,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
             });
         } else if(playerEvent == 'endOfFile') {
             requestAnimationFrame(() => setTimeout(() => {
-                super.stop();
+                super.stop(true);
                 super.triggerPlayerEvent(playerEvent, data);
             }, 1))
         } else {
@@ -237,8 +243,22 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         this.events.forEach(track => {
             track.forEach(event => {
                 if (event.name === 'Program Change') {
-                    if(event.channel == 10) instrumentMap[event.channel] = -1;
+                    if(instrumentMap[event.channel]) return;
+                    else if(event.channel == 10) instrumentMap[event.channel] = -1;
                     else instrumentMap[event.channel] = event.value + 1;
+                }
+            });
+        });
+        return instrumentMap;
+    }
+
+
+    async #getUniqueInstruments() {
+        const instrumentMap = new Set();
+        this.events.forEach(track => {
+            track.forEach(event => {
+                if (event.name === 'Program Change') {
+                    instrumentMap.add(event.channel == 10 ? -1 : (event.value + 1));
                 }
             });
         });
@@ -279,7 +299,6 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
 
 
     async #handleMidiPipeline(event) {
-        if(event.tick < (this.getCurrentTick() - 100)) return;
         if(!this.isPlaying()) return;
         switch (event.name) {
             case 'Text Event':
@@ -294,6 +313,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
                 });
                 break;
             case 'Note on':
+                if(event.tick < (this.getCurrentTick() - 10)) return;
                 if(event.noteNumber === undefined) return;
                 if (event.velocity > 0 && event.velocity <= 127) {
                     this.#stopNote(event.channel, event.noteNumber);
@@ -306,6 +326,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
                 } else this.#stopNote(event.channel, event.noteNumber);
                 break;
             case 'Note off':
+                if(event.tick < (this.getCurrentTick() - 100)) return;
                 if(event.noteNumber === undefined) return;
                 this.#stopNote(event.channel, event.noteNumber);
                 break;
@@ -316,8 +337,12 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
                 this.#players[event.channel]?.setPitchBend?.(event.value);
                 break;
             case 'Program Change':
+                if(event.channel == 10) break;
+                if(!this.#opts.presetAuto && !this.#opts.presetRandom) break;
+                if(this.#players[event.channel].preset.program != (event.value + 1)) {
+                    this.#players[event.channel].preset = this.#instruments[event.value + 1];
+                }
                 break;
-
         }
     }
 

@@ -28,6 +28,12 @@ export default class WebAudioFontPlayer {
         this.#preset.zones.map(zone => this.#adjustZone(zone));
     }
 
+    get preset() { return this.#preset; }
+    set preset(preset) {
+        this.#preset = preset;
+        this.#preset.zones.map(zone => this.#adjustZone(zone));
+    }
+
 
     queueWaveTable(when, pitch, duration, volume, slides) {
         if(this.#audioCtx.state === 'suspended') this.#audioCtx.resume().catch(() => { });
@@ -80,12 +86,6 @@ export default class WebAudioFontPlayer {
         envelope.baseDetune = baseDetune;
 
         return envelope;
-    }
-
-
-    queueChord(prst, w, pchs, d, v, s) {
-        const vol = this.#limitVolume(v);
-        return pchs.map((p, i) => this.queueWaveTable(this.#audioCtx, this.#audioCtx.destination, prst, w, p, d, vol - Math.random() * 0.01, s?.[i])).filter(Boolean);
     }
 
 
