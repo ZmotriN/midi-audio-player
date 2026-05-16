@@ -129,17 +129,13 @@ class programChooser {
 
 
 	const loadPrograms = async (channels, presets) => {
-
-		// const parent = document.querySelector('section > .instruments')
 		presets = {};
 		const parent = create('div', 'instruments');
 		await Promise.all(Object.keys(channels).map(async channel => presets[channels[channel].preset.program] = await player.getProgramInstruments(channels[channel].preset.program)));
 		Object.keys(channels).map(channel => {
 			programs[channel] = new programChooser(parent, channel, presets[channels[channel].preset.program], channels[channel].preset.id);
 		});
-
 		document.querySelector('section.programs').replaceChildren(parent);
-
 	}
 
 
@@ -237,6 +233,12 @@ class programChooser {
 			document.querySelector('.controls').classList.remove('disabled');
 			document.querySelector('.waveform').classList.remove('disabled');
 			document.querySelector('.programs').classList.remove('disabled');
+
+			[btnpause, btnstop].forEach(btn => btn.classList.remove('active'));
+			btnplay.classList.add('active');
+			player.play();
+
+
 			log('Ready');
 		} catch(e) {
 			log('Error: Invalid file format.');

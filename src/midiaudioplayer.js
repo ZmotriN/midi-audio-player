@@ -120,6 +120,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         await Promise.all(Object.keys(this.#channels).map(async channel => {
             this.#players[channel] = await this.#createWebAudioFontPlayer(this.#instruments[this.#channels[channel]]);
         }));
+        super.triggerPlayerEvent('presetsLoaded', this.#instruments);
         return this.#players;
 	}
 
@@ -373,7 +374,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         const instrumentMap = {};
         this.events.forEach(track => {
             track.forEach(event => {
-                if (event.name === 'Program Change') {
+                if (event.name === 'Program Change' && (event.value + 1) <= 128) {
                     if(instrumentMap[event.channel]) return;
                     else if(event.channel == 10) instrumentMap[event.channel] = -1;
                     else instrumentMap[event.channel] = event.value + 1;
@@ -388,7 +389,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         const instrumentMap = new Set();
         this.events.forEach(track => {
             track.forEach(event => {
-                if (event.name === 'Program Change') {
+                if (event.name === 'Program Change' && (event.value + 1) <= 128) {
                     instrumentMap.add(event.channel == 10 ? -1 : (event.value + 1));
                 }
             });

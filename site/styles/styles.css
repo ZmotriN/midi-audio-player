@@ -290,8 +290,9 @@ section:has(.controls) {
   width: var(--progress);
   height: 100%;
   border-right: 0.1rem solid var(--color-second);
-  background-color: rgba(0, 0, 0, 0.167);
+  background-color: rgba(0, 0, 0, 0.2);
   transition: width 50ms linear;
+  box-shadow: 0.3125rem 0rem 0.3125rem -0.125rem rgba(0, 0, 0, 0.3);
 }
 .waveform__click {
   position: absolute;
@@ -482,6 +483,23 @@ section:has(.controls) {
   background-color: var(--color-pre);
   color: var(--color-main);
   font-size: 1.2rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-hljs2) var(--color-hljs3);
+}
+.instruments > .instrument > select::-webkit-scrollbar {
+  height: 0.2rem;
+}
+.instruments > .instrument > select::-webkit-scrollbar-track {
+  background: var(--color-hljs3);
+  border-radius: 0.1rem;
+}
+.instruments > .instrument > select::-webkit-scrollbar-thumb {
+  background-color: var(--color-hljs2);
+  border-radius: 0.1rem;
+  border: 0.05rem solid var(--color-hljs3);
+}
+.instruments > .instrument > select::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-hljs1);
 }
 .instruments > .instrument > select > option {
   font-family: var(--font-family);

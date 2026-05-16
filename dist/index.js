@@ -1245,11 +1245,13 @@ var WebAudioFontPlayer = class {
     if (this.#audioCtx.state === "suspended") this.#audioCtx.resume().catch(() => {
     });
     const vol = this.#limitVolume(volume);
-    const zone = this.#findZone(pitch);
+    const zone = this.#findZone(Math.round(pitch));
     if (!zone?.buffer) return null;
-    const baseDetune = zone.originalPitch - 100 * zone.coarseTune - zone.fineTune;
-    const currentBendSemitones = (this.#pitchBendValue - 8192) / 8192 * this.#bendRange;
-    const playbackRate = Math.pow(2, (100 * (pitch + currentBendSemitones) - baseDetune) / 1200);
+    const baseDetuneCents = zone.originalPitch - 100 * zone.coarseTune - zone.fineTune;
+    const originalPitchCents = pitch * 100;
+    const currentBendCents = (this.#pitchBendValue - 8192) / 8192 * this.#bendRange * 100;
+    const totalCents = originalPitchCents - baseDetuneCents + currentBendCents;
+    const playbackRate = Math.pow(2, totalCents / 1200);
     const startWhen = Math.max(when, this.#audioCtx.currentTime);
     let waveDuration = duration + this.#afterTime;
     const loop = zone.loopStart >= 1 && zone.loopStart < zone.loopEnd;
@@ -1262,7 +1264,9 @@ var WebAudioFontPlayer = class {
     if (slides?.length > 0) {
       source.playbackRate.setValueAtTime(playbackRate, startWhen);
       slides.forEach((s) => {
-        const newRate = Math.pow(2, (100 * (pitch + s.delta) - baseDetune) / 1200);
+        const slidePitchCents = (pitch + s.delta) * 100;
+        const totalSlideCents = slidePitchCents - baseDetuneCents + currentBendCents;
+        const newRate = Math.pow(2, totalSlideCents / 1200);
         source.playbackRate.linearRampToValueAtTime(newRate, startWhen + s.when);
       });
     }
@@ -1279,7 +1283,7 @@ var WebAudioFontPlayer = class {
     envelope.when = startWhen;
     envelope.duration = waveDuration;
     envelope.pitch = pitch;
-    envelope.baseDetune = baseDetune;
+    envelope.baseDetune = baseDetuneCents;
     return envelope;
   }
   async cancelQueue() {
@@ -1306,11 +1310,12 @@ var WebAudioFontPlayer = class {
     const now = this.#audioCtx.currentTime;
     this.#envelopes.forEach((e) => {
       if (e.audioBufferSourceNode && e.when + e.duration > now) {
-        const originalPitch = e.pitch;
-        const baseDetune = e.baseDetune;
-        const totalCents = originalPitch * 100 - baseDetune + semitones * 100;
+        const originalPitchCents = e.pitch * 100;
+        const baseDetuneCents = e.baseDetune;
+        const bendCents = semitones * 100;
+        const totalCents = originalPitchCents - baseDetuneCents + bendCents;
         const newRate = Math.pow(2, totalCents / 1200);
-        e.audioBufferSourceNode.playbackRate.setTargetAtTime(newRate, now, 0.05);
+        e.audioBufferSourceNode.playbackRate.setTargetAtTime(newRate, now, 0.015);
       }
     });
   }
@@ -1854,6 +1859,7 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
     await Promise.all(Object.keys(this.#channels).map(async (channel) => {
       this.#players[channel] = await this.#createWebAudioFontPlayer(this.#instruments[this.#channels[channel]]);
     }));
+    super.triggerPlayerEvent("presetsLoaded", this.#instruments);
     return this.#players;
   }
   async play(content = null) {
@@ -2075,7 +2081,7 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
     const instrumentMap = {};
     this.events.forEach((track) => {
       track.forEach((event) => {
-        if (event.name === "Program Change") {
+        if (event.name === "Program Change" && event.value + 1 <= 128) {
           if (instrumentMap[event.channel]) return;
           else if (event.channel == 10) instrumentMap[event.channel] = -1;
           else instrumentMap[event.channel] = event.value + 1;
@@ -2088,7 +2094,7 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
     const instrumentMap = /* @__PURE__ */ new Set();
     this.events.forEach((track) => {
       track.forEach((event) => {
-        if (event.name === "Program Change") {
+        if (event.name === "Program Change" && event.value + 1 <= 128) {
           instrumentMap.add(event.channel == 10 ? -1 : event.value + 1);
         }
       });
