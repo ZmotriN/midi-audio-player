@@ -6,18 +6,21 @@ import DefaultPreset from "./presets/defaultpreset.json";
 
 const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
 
+
 export default class MidiAudioPlayer extends MidiPlayer.Player {
 
     static ENDPOINT       = 'https://zmotrin.github.io/webaudiofontjson/';
     static DEFAULTPRESET  = -1;
     static REFERENCE_GAIN = 0.15;
 
-    #catalog     = null;
-	#audioCtx    = null;
-	#compressor  = null;
-    #activeNotes = {};
-    #instruments = {};
-    #players     = {};
+    #catalog       = null;
+	#audioCtx      = null;
+	#compressor    = null;
+    #activeNotes   = {};
+    #channelStates = {};
+    #instruments   = {};
+    #players       = {};
+    #channels      = {};
 
 	#opts = {
         volume: 0.7,
@@ -26,6 +29,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         localCache: false,
         presetAuto: false,
         presetRandom: false,
+        preferred: [],
         presets: { [-1]: -1 },
 	};
 
@@ -45,6 +49,8 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         this.#compressor = new AudioCompressor(this.#audioCtx, this.#opts.volume, this.#opts.reverb);
 	}
 
+    get channels() { return this.#players; }
+    get channelStates() { return this.#channelStates; }
     get volume() { return this.#opts.volume; }
     set volume(vol) { this.#opts.volume = clamp(vol, 0, 1); this.#compressor.masterVolume = this.#opts.volume; }
     get rever() { return this.#compressor.reverb; }
@@ -91,13 +97,17 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
     async load(content) {
 		if(this.isPlaying()) this.stop();
 		this.#clearActiveNotes();
+        this.#players = {};
+        this.#instruments = {};
+        this.#activeNotes = {};
 		this.#log('Loading buffer...');
         await this.loadArrayBuffer(content);
         this.#log('Loading instruments...');
         this.#instruments = {};
-        const instruments = await this.#getInstruments();
+        this.#channels = await this.#getInstruments();
+        this.#channelStates = Object.keys(this.#channels).reduce((acc, key) => ({ ...acc, [key]: false }), {});
         const uniqueInstruments = await this.#getUniqueInstruments();
-        if(!Object.values(instruments).length) this.#log("Error: no instrument found");
+        if(!Object.values(this.#channels).length) this.#log("Error: no instrument found");
         if(this.#opts.presetRandom || this.#opts.presetAuto) await this.getCatalog();
         await Promise.all([...uniqueInstruments].map(async program => {
             let preset = null;
@@ -107,10 +117,10 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
             else preset = await this.getPreset(this.#opts.presets[program]);
             this.#instruments[program] = preset;
         }));
-        await Promise.all(Object.keys(instruments).map(async channel => {
-            this.#players[channel] = await this.#createWebAudioFontPlayer(this.#instruments[instruments[channel]]);
+        await Promise.all(Object.keys(this.#channels).map(async channel => {
+            this.#players[channel] = await this.#createWebAudioFontPlayer(this.#instruments[this.#channels[channel]]);
         }));
-        return true;
+        return this.#players;
 	}
 
 
@@ -143,7 +153,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         analyser.getByteFrequencyData(dataArray);
         let values = 0;
         for (let i = 0; i < dataArray.length; i++) values += dataArray[i];
-        return (values / dataArray.length / 255);
+        return values / (dataArray.length * 100);
     }
 
 
@@ -156,24 +166,58 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         if (!this.totalTicks || !this.events) return '';
         const waveform = new Array(samples).fill(0);
         const tickInterval = this.totalTicks / samples;
-        this.events.forEach(track => {
-            track.forEach(event => {
-                if (event.name === 'Note on' && event.velocity > 0) {
-                    const idx = Math.floor(event.tick / tickInterval);
-                    if (idx < samples) waveform[idx] += event.velocity;
+        const allEvents = [];
+        this.events.forEach(track => track.forEach(event => {
+            if (
+                event.name === 'Controller Change' ||
+                event.name === 'Program Change' ||
+                (event.name === 'Note on' && event.velocity > 0)
+            ) {
+                allEvents.push(event);
+            }
+        }));
+        allEvents.sort((a, b) => a.tick - b.tick);
+        const channelsVolume = new Array(16).fill(100);
+        const channelsExpression = new Array(16).fill(127);
+        const activeInstruments = new Array(16).fill(false);
+        activeInstruments[9] = true;
+        allEvents.forEach(event => {
+            const idx = Math.floor(event.tick / tickInterval);
+            if (idx >= samples) return;
+            const chan = event.channel;
+            if (event.name === 'Program Change') {
+                if (chan !== undefined) {
+                    activeInstruments[chan] = true;
                 }
-            });
+            }
+            else if (event.name === 'Controller Change') {
+                if (chan !== undefined) {
+                    if (event.controllerType === 7) channelsVolume[chan] = event.value;
+                    else if (event.controllerType === 11) channelsExpression[chan] = event.value;
+                }
+            }
+            else if (event.name === 'Note on') {
+                if (chan !== undefined && activeInstruments[chan]) {
+                    const volFactor = channelsVolume[chan] / 127;
+                    const expFactor = channelsExpression[chan] / 127;
+                    const modulatedVelocity = event.velocity * volFactor * expFactor;
+                    waveform[idx] += modulatedVelocity;
+                }
+            }
         });
-        const maxAmp = Math.max(...waveform);
-        const normalized = maxAmp > 0 ? waveform.map(v => v / maxAmp) : waveform;
+        const maxAmp = waveform.reduce((max, val) => {
+            if (isNaN(val)) return max;
+            return val > max ? val : max;
+        }, 0);
+        const normalized = maxAmp > 0 ? waveform.map(v => isNaN(v) ? 0 : v / maxAmp) : waveform.fill(0);
         const width = samples;
         const height = width / 5;
         const points = normalized.map((val, i) => {
             const x = i;
-            const y = height - (val * height);
+            const y = Math.max(0, Math.min(height, height - (val * height)));
             return `${x},${y.toFixed(2)}`;
         });
-        const d = `M ${points.join(' L ')}`;
+        const d = `M 0,${height} L ${points.join(' L ')} L ${width},${height}`;
         return `<svg class="midiaudioplayer-waveform" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none"><path d="${d}" fill="none" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
     }
 
@@ -225,7 +269,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
                 sampleRate: this.sampleRate,
                 totalTicks: this.totalTicks,
                 totalEvents: this.totalEvents,
-                instruments: await this.#getInstruments(),
+                channels: await this.#channels,
             });
         } else if(playerEvent == 'endOfFile') {
             requestAnimationFrame(() => setTimeout(() => {
@@ -235,6 +279,14 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         } else {
             super.triggerPlayerEvent(playerEvent, data);
         }
+    }
+
+
+    async getProgramInstruments(program) {
+        const categories = await this.getCategories();
+        let instruments = [];
+        await Promise.all(categories.map(async category => category.instruments.filter(elm => elm.program == program).forEach(elm => instruments = [...instruments, ...elm.presets])));
+        return instruments;
     }
 
 
@@ -266,36 +318,29 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
     }
 
 
-    async #getProgramInstruments(program) {
-        const categories = await this.getCategories();
-        let instruments = [];
-        await Promise.all(categories.map(async category => category.instruments.filter(elm => elm.program == program).forEach(elm => instruments = [...instruments, ...elm.presets])));
-        return instruments;
-    }
-
-
     async #getRandomPreset(program) {
-        const instruments = await this.#getProgramInstruments(program);
+        const instruments = await this.getProgramInstruments(program);
         if(!instruments.length) return null;
         return await this.getPreset(instruments[Math.floor(Math.random() * instruments.length)].id);
     }
 
 
     async #getAutoPreset(program) {
-        const instruments = await this.#getProgramInstruments(program);
+        const instruments = await this.getProgramInstruments(program);
         if(!instruments.length) return null;
-        return await this.getPreset(instruments[0].id);
+        let preset = null;
+        this.#opts.preferred.some(bank => {
+            preset = instruments.find(elm => elm.bank == bank);
+            if(preset) return true;
+        });
+        if(preset) return await this.getPreset(preset.id);
+        else return await this.getPreset(instruments[0].id);
     }
 
 
     async #createWebAudioFontPlayer(preset) {
         return new WebAudioFontPlayer(this.#audioCtx, this.#compressor, preset);
     }
-
-
-	async #endOfFile() {
-		if(typeof this.#opts.onEndFile == 'function') await this.#opts.onEndFile();
-	}
 
 
     async #handleMidiPipeline(event) {
@@ -348,8 +393,17 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
 
 
     #addNote(channel, note, envelope) {
-        if(!this.#activeNotes[channel]) this.#activeNotes[channel] = new Map();
+        if (!this.#activeNotes[channel]) this.#activeNotes[channel] = new Map();
         this.#activeNotes[channel].set(note, envelope);
+        const realDurationMs = (envelope.duration || 0) * 1000;
+        const decayTime = Math.max(500, realDurationMs + 100);
+        setTimeout(() => {
+            if (this.#activeNotes[channel]?.get(note) === envelope) {
+                this.#activeNotes[channel].delete(note);
+                this.#updateChannelStates();
+            }
+        }, decayTime);
+        this.#updateChannelStates();
     }
 
 
@@ -361,27 +415,41 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
                 player.registerSustainNote(() => {
                     envelope.cancel();
                     this.#activeNotes[channel]?.delete(noteNumber);
+                    this.#updateChannelStates();
                 });
             } else {
                 envelope.cancel();
                 this.#activeNotes[channel]?.delete(noteNumber);
             }
         }
+        this.#updateChannelStates();
     }
 
 
     #clearActiveNotes() {
-        Object.values(this.#activeNotes).map(map => {
-            map.forEach((envelope, note) => {
+        Object.keys(this.#activeNotes).map(channel => {
+            this.#activeNotes[channel].forEach((envelope, note) => {
                 if (envelope && envelope.cancel) {
                     envelope.cancel();
                 }
+                this.#activeNotes[channel]?.delete(note);
             });
         });
+        this.#updateChannelStates();
     }
 
 
-    #log(str) {
+    #updateChannelStates() {
+        const channelStates = structuredClone(this.#channelStates);
+        Object.keys(this.#activeNotes).forEach(channel => channelStates[channel] = Boolean(this.#activeNotes[channel].size));
+        if(channelStates != this.#channelStates) {
+            this.#channelStates = channelStates;
+            if(Object.values(this.#channelStates).length) this.triggerPlayerEvent('channelState', this.#channelStates);
+        }
+    }
+
+
+    #log(str, err = false) {
         this.triggerPlayerEvent('logs', str);
     }
 

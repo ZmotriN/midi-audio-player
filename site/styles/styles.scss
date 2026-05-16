@@ -217,6 +217,47 @@ main:has(section:first-child .controls) {
 }
 
 
+section:has(.dnd) {
+	--show: flex;
+	--opacity: 0;
+	
+	&:hover:has(:not(.dnd.show)) {
+		--show: none;
+	}
+
+	& > .dnd {
+		position: absolute;
+		inset: 0;
+		background-color: var(--color-pre);
+		border: 0.4rem dashed var(--color-second);
+		border-radius: 0.2rem;
+		color: var(--color-second);
+		display: var(--show);
+		opacity: var(--opacity);
+		align-items: center;
+		justify-content: center;
+		text-align: center;
+		font-size: 2rem;
+		font-weight: 700;
+		cursor: pointer;
+		z-index: 10000;
+
+		&:hover,
+		&.dragover {
+			color: var(--color-third);
+			border-color: var(--color-third);
+			opacity: 0.8;
+		}
+
+		&.show {
+			--show: flex;
+			--opacity: 0.8;
+		}
+	}
+
+}
+
+section:has(.instruments),
 section:has(.controls) {
 	display: flex;
 	justify-content: center;
@@ -319,10 +360,6 @@ section:has(.controls) {
 		inset: var(--pad);
 		z-index: 20;
 		cursor: pointer;
-
-
-
-
 	}
 
 	.midiaudioplayer-waveform {
@@ -483,6 +520,98 @@ section:has(.controls) {
 
 }
 
+.programs.disabled{
+	pointer-events: none;
+	filter: saturate(0%);
+	opacity: 0.5;
+}
+
+
+.instruments {
+	position: relative;
+	display: flex;
+	// justify-content: center;
+	align-items: center;
+	flex-direction: column;
+	row-gap: 1rem;
+	width: 80%;
+	// background-color: red;
+
+	& > .instrument {
+		position: relative;
+		width: 100%;
+		// background-color: blue;
+
+		.program {
+			position: absolute;
+			top: 0;
+			left: -3rem;
+			height: 100%;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			// background-color: yellow;
+		}
+
+		.light {
+			position: absolute;
+			top: 0;
+			right: -3rem;
+			height: 100%;
+			aspect-ratio: 1 / 1;
+			background-color: var(--color-pre);
+			border-radius: 100%;
+			overflow: hidden;
+
+			
+
+			&::after {
+				content: "";
+				position: absolute;
+				inset: 0;
+				background-color: var(--color-second);
+				opacity: 0;
+				transition: opacity 250ms ease-out;
+			}
+
+
+			&.active::after {
+				transition: opacity 5ms ease-in;
+				opacity: 1;
+			}
+
+		}
+
+
+		& > select {
+			// appearance: none;
+			width: 100%;
+			font-family: var(--font-family);
+			background-color: var(--color-pre);
+			color: var(--color-main);
+			font-size: 1.2rem;
+
+
+			& > option {
+				font-family: var(--font-family);
+				background-color: var(--color-pre);
+				color: var(--color-main);
+				font-size: 1.2rem;
+
+				&:disabled {
+					font-style: italic;
+					font-weight: 700;
+					color: var(--color-second);
+				}
+
+			}
+
+		}
+
+
+	}
+
+}
 
 
 iframe[src*="codepen.io"] {

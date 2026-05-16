@@ -19,6 +19,88 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 
 
 
+class DNDZone {
+
+	container = null;
+	opts = { onFileDrop: null };
+	
+	constructor(container, opts = {}) {
+		this.opts = { ...this.opts, ...opts };
+		if(typeof container != 'string') this.container = container;
+		else this.container = document.querySelector(container);
+		this.container.addEventListener('dragover',  e => e.preventDefault());
+		this.container.addEventListener('dragenter', e => this.dragEnter(e));
+		this.container.addEventListener('dragleave', e => this.dragLeave(e));
+		this.container.addEventListener('drop',      e => this.drop(e));
+	}
+
+	dragEnter(e) {
+		e.preventDefault();
+		this.container.classList.add('dragover');
+	}
+
+	dragLeave(e) {
+		this.container.classList.remove('dragover');
+	}
+
+	async drop(e) {
+		e.preventDefault();
+		const files = e.dataTransfer.files;
+		if (files.length > 0) await this.opts.onFileDrop?.(e.dataTransfer.files[0]);
+		this.container.classList.remove('dragover');
+	}
+
+}
+
+
+
+class programChooser {
+
+	#parent = null;
+	#channel = null;
+	#presets = null;
+	#selpreset = null;
+	#light = null;
+
+	constructor(parent, channel, presets, selpreset) {
+		this.#parent = parent;
+		this.#channel = channel;
+		this.#selpreset = selpreset;
+		presets.forEach(preset => preset.name = `${preset.instrument} / ${preset.bank} #${preset.serie + 1}`);
+		this.#presets = presets.sort((a, b) => a.name.localeCompare(b.name));;
+		this.#create();
+	}
+
+
+	#create() {
+		const container = create('div', 'instrument');
+		const select = container.create('select');
+		select.create('option', null, this.#presets[0].category, { disabled: true });
+		this.#presets.forEach(preset => {
+			select.create('option', null, preset.name, { value: preset.id });
+		});
+		select.value = this.#selpreset;
+		// console.log();
+
+		container.create('div', 'program', `#${this.#channel}`);
+		this.#light = container.create('div', 'light');
+
+		this.#parent.appendChild(container);
+	}
+
+
+	setActive(active) {
+		if(active) {
+			this.#light.classList.add('active');
+		}
+		else this.#light.classList.remove('active');
+	}
+
+
+}
+
+
+
 (async () => {
 	const song = '../../data/closer.mid';
 
@@ -26,6 +108,11 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 	const btnplay = document.querySelector('.btn.play');
 	const btnstop = document.querySelector('.btn.stop');
 	const btnpause = document.querySelector('.btn.pause');
+
+	const presets = {};
+	const programs = {};
+	let channels = null;
+
 
 	const log = async (str) => {
 		const now = new Date();
@@ -38,6 +125,21 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 		if(logs.innerText) logs.innerText += "\n";
 		logs.innerText += `[${formatted}] ${str}`;
 		logs.scrollTop = logs.scrollHeight;
+	}
+
+
+	const loadPrograms = async (channels, presets) => {
+
+		// const parent = document.querySelector('section > .instruments')
+		presets = {};
+		const parent = create('div', 'instruments');
+		await Promise.all(Object.keys(channels).map(async channel => presets[channels[channel].preset.program] = await player.getProgramInstruments(channels[channel].preset.program)));
+		Object.keys(channels).map(channel => {
+			programs[channel] = new programChooser(parent, channel, presets[channels[channel].preset.program], channels[channel].preset.id);
+		});
+
+		document.querySelector('section.programs').replaceChildren(parent);
+
 	}
 
 
@@ -75,9 +177,8 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 		presetRandom: true,
 		presetAuto: true,
 		localCache: true,
-		presets: {
-			// [-1]: '12805_Chaos'
-		}
+		preferred: ["JCLive", "LesPaul", "Chaos"],
+		// presets: { [-1]: '12805_Chaos' }
 	});
 	player.on('endOfFile', async () => {
 		[btnpause, btnplay].forEach(btn => btn.classList.remove('active'));
@@ -88,6 +189,7 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 	});
 	player.on('fileLoaded', async (data) => {
 		songInfos = data;
+		// console.log(songInfos);
 		log("Generating waveform...");
 		const svgCode = await player.generateWaveformSVG();
 		waveform.style.setProperty('--progress', `0%`);
@@ -96,6 +198,9 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 		document.querySelector('.waveform__container').innerHTML = svgCode;
 	});
 	player.on('logs', str => log(str));
+	player.on('channelState', async channels => {
+		Object.keys(channels).map(async channel => programs[channel].setActive(channels[channel]));
+	});
 	document.querySelector('.waveform__click').addEventListener('click', async event => {
 		const rect = event.currentTarget.getBoundingClientRect();
 		const x = event.clientX - rect.left;
@@ -106,6 +211,37 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 		btnplay.classList.add('active');
 		player.play();
 	});
+
+
+	new DNDZone(document.querySelector('.dnd'), { onFileDrop: async file => {
+		if(!['mid', 'midi', 'kar'].includes(file.name.split('.').pop()?.toLowerCase()) || !file.size || file.size > 5242880) {
+			log('Error: Invalid file format.');
+			return
+		}
+		document.querySelector('.controls').classList.add('disabled');
+		document.querySelector('.waveform').classList.add('disabled');
+		document.querySelector('.programs').classList.add('disabled');
+		try {
+			if(player.isPlaying()) player.stop(true);
+			const buffer = await file.arrayBuffer();
+			channels = await player.load(buffer);
+
+			await loadPrograms(channels, presets);
+
+
+			[btnpause, btnplay].forEach(btn => btn.classList.remove('active'));
+			btnstop.classList.add('active');
+			waveform.style.setProperty('--progress', `0%`);
+			waveform.style.setProperty('--time', `"0:00"`);
+
+			document.querySelector('.controls').classList.remove('disabled');
+			document.querySelector('.waveform').classList.remove('disabled');
+			document.querySelector('.programs').classList.remove('disabled');
+			log('Ready');
+		} catch(e) {
+			log('Error: Invalid file format.');
+		}
+	}});
 
 
 	const input = document.querySelector('.dbvol__input');
@@ -131,7 +267,7 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 		requestAnimationFrame(async () => {
 			const tick = player.getCurrentTick();
 			if(tick) {
-				const time = (songInfos.duration - player.getSongTimeRemaining()).toFixed(1);
+				const time = (songInfos.duration - player.getSongTimeRemaining()).toFixed(3);
 				if(time != lasttime) {
 					waveform.style.setProperty('--progress', `${time / songInfos.duration * 100}%`);
 					const progress = formatTime(time);
@@ -142,7 +278,8 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 					lasttime = time;
 				}
 			}
-			const vol = await player.getRealTimeVolume() * 1.8;
+
+			const vol = await player.getRealTimeVolume();
 			const indic = Math.ceil(vol * 36);
 			if(indic == lastmeter) return;
 			document.querySelectorAll(`.meter svg .meter__bands > .meter__band:nth-last-child(-n + ${indic})`).forEach(async elm => elm.style.opacity = 1);
@@ -156,10 +293,13 @@ HTMLElement.prototype.create = function(tag, classname=null, content=null, attrs
 	log("Downloading song...");
 	const response = await fetch(song);
 	const buffer = await response.arrayBuffer();
-	const infos = await player.load(buffer);
+	channels = await player.load(buffer);
+	await loadPrograms(channels, presets);
 
-	log("Ready");
+
+	log("Ready: Drag & drop your files here");
 	document.querySelector('.controls').classList.remove('disabled');
 	document.querySelector('.waveform').classList.remove('disabled');
+	document.querySelector('.programs').classList.remove('disabled');
 })();
 

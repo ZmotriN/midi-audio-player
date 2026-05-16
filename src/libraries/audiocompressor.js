@@ -27,10 +27,11 @@ export default class AudioCompressor {
         this.#generateImpulseResponse(1.5, 2.0);
 
         this.#limiter = this.#audioCtx.createDynamicsCompressor();
-        this.#limiter.threshold.setValueAtTime(-20, this.#audioCtx.currentTime);
+        this.#limiter.threshold.setValueAtTime(-10.0, this.#audioCtx.currentTime);
         this.#limiter.ratio.setValueAtTime(20, this.#audioCtx.currentTime);
         this.#limiter.attack.setValueAtTime(0.001, this.#audioCtx.currentTime);
-        this.#limiter.release.setValueAtTime(0.25, this.#audioCtx.currentTime);
+        this.#limiter.release.setValueAtTime(0.1, this.#audioCtx.currentTime);
+        this.#limiter.knee.setValueAtTime(0, this.#audioCtx.currentTime);
 
         this.#analyser = this.#audioCtx.createAnalyser();
         this.#analyser.fftSize = 256;
@@ -39,14 +40,13 @@ export default class AudioCompressor {
         this.#output = this.#audioCtx.createGain();
         this.#output.gain.setValueAtTime(volume, this.#audioCtx.currentTime);
 
-        lastNode.connect(this.#limiter);
-
+        lastNode.connect(this.#output);
         lastNode.connect(this.#reverbNode);
         this.#reverbNode.connect(this.#reverbWet);
-        this.#reverbWet.connect(this.#limiter);
+        this.#reverbWet.connect(this.#output); 
 
-        this.#limiter.connect(this.#output);
-        this.#output.connect(this.#analyser);
+        this.#output.connect(this.#limiter);
+        this.#limiter.connect(this.#analyser);
         this.#analyser.connect(this.#audioCtx.destination);
     }
 
@@ -60,10 +60,10 @@ export default class AudioCompressor {
     get masterVolume() { return this.#output.gain.value; }
     set masterVolume(value) {
         const linearValue = Math.max(0, Math.min(1, value));
-        const logVolume = Math.pow(linearValue, 2); 
+        const logVolume = Math.pow(linearValue, 2);
         this.#output.gain.setTargetAtTime(logVolume, this.#audioCtx.currentTime, 0.01);
     }
-    
+
 
     killReverbTail() {
         const now = this.#audioCtx.currentTime;
