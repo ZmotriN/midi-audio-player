@@ -169,7 +169,7 @@ class programChooser {
 	const waveform = document.querySelector('.waveform');
 	const player = new MidiAudioPlayer({
 		volume: localStorage.getItem('waf_volume') || 0.7,
-		reverb: 0.2,
+		reverb: 0.3,
 		presetRandom: true,
 		presetAuto: true,
 		localCache: true,

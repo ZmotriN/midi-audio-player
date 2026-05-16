@@ -11,6 +11,9 @@ export default class WebAudioFontPlayer {
     #bendRange = 2;
 
     #mainGain = null;
+    #volumeValue = 0.7;
+    #expressionValue = 1.0;
+    #expressionGain = null;
     #sustain = false;
     #pitchBendValue = 8192;
     #notesWaitingForSustain = new Set();
@@ -22,8 +25,11 @@ export default class WebAudioFontPlayer {
         this.#preset = preset;
 
         this.#mainGain = this.#audioCtx.createGain();
-        this.#mainGain.gain.setValueAtTime(0.7, this.#audioCtx.currentTime);
-        this.#mainGain.connect(this.#compressor.input);
+        this.#mainGain.gain.setValueAtTime(this.#volumeValue, this.#audioCtx.currentTime);
+        this.#expressionGain = this.#audioCtx.createGain();
+        this.#expressionGain.gain.setValueAtTime(this.#expressionValue, this.#audioCtx.currentTime);
+        this.#mainGain.connect(this.#expressionGain);
+        this.#expressionGain.connect(this.#compressor.input);
 
         this.#preset.zones.map(zone => this.#adjustZone(zone));
     }
@@ -37,20 +43,15 @@ export default class WebAudioFontPlayer {
 
     queueWaveTable(when, pitch, duration, volume, slides) {
         if (this.#audioCtx.state === 'suspended') this.#audioCtx.resume().catch(() => { });
-
         const vol = this.#limitVolume(volume);
-
         const zone = this.#findZone(Math.round(pitch));
         if (!zone?.buffer) return null;
 
         const baseDetuneCents = zone.originalPitch - 100.0 * zone.coarseTune - zone.fineTune;
-
         const originalPitchCents = pitch * 100;
         const currentBendCents = ((this.#pitchBendValue - 8192) / 8192) * this.#bendRange * 100;
-
         const totalCents = (originalPitchCents - baseDetuneCents) + currentBendCents;
         const playbackRate = Math.pow(2, totalCents / 1200.0);
-
         const startWhen = Math.max(when, this.#audioCtx.currentTime);
         let waveDuration = duration + this.#afterTime;
 
@@ -129,6 +130,7 @@ export default class WebAudioFontPlayer {
                 const bendCents = semitones * 100;
                 const totalCents = (originalPitchCents - baseDetuneCents) + bendCents;
                 const newRate = Math.pow(2, totalCents / 1200.0);
+                e.audioBufferSourceNode.playbackRate.cancelScheduledValues(now);
                 e.audioBufferSourceNode.playbackRate.setTargetAtTime(newRate, now, 0.015);
             }
         });
@@ -137,10 +139,15 @@ export default class WebAudioFontPlayer {
 
     setController(number, value) {
         const now = this.#audioCtx.currentTime;
+        const normalizedValue = Math.max(0, Math.min(127, value)) / 127;
         switch (number) {
             case 7:
-                const vol = value / 127;
-                this.#mainGain.gain.setTargetAtTime(vol, now, 0.05);
+                this.#volumeValue = normalizedValue;
+                this.#mainGain.gain.setTargetAtTime(this.#volumeValue, now, 0.05);
+                break;
+            case 11:
+                this.#expressionValue = normalizedValue;
+                this.#expressionGain.gain.setTargetAtTime(this.#expressionValue, now, 0.03);
                 break;
             case 64:
                 this.#sustain = value >= 64;
@@ -181,7 +188,7 @@ export default class WebAudioFontPlayer {
                 },
                 error => {
                     console.error("Audio decoding error:", error);
-                    console.warning(this.#preset);
+                    console.warn(this.#preset);
                     return false;
                 }
             );
@@ -203,8 +210,7 @@ export default class WebAudioFontPlayer {
 
 
     #setupEnvelope(envelope, zone, volume, when, sampleDuration, noteDuration) {
-        envelope.gain.setValueAtTime(this.#noZeroVolume(0), this.#audioCtx.currentTime);
-
+        envelope.gain.setValueAtTime(this.#nearZero, this.#audioCtx.currentTime);
         const duration = Math.min(noteDuration, sampleDuration - this.#afterTime);
         const ahdsr = (zone.ahdsr && zone.ahdsr.length > 0) ? zone.ahdsr : [
             { duration: 0, volume: 1 },
@@ -213,7 +219,7 @@ export default class WebAudioFontPlayer {
 
         envelope.gain.cancelScheduledValues(when);
         const initialVol = (ahdsr[0]?.volume ?? 1) * volume;
-        envelope.gain.setValueAtTime(this.#noZeroVolume(initialVol), when);
+        envelope.gain.linearRampToValueAtTime(this.#noZeroVolume(initialVol), when + 0.002);
 
         let lastTime = 0;
         let lastVolume = ahdsr[0]?.volume ?? 1;
@@ -225,7 +231,7 @@ export default class WebAudioFontPlayer {
             if (stageDuration > remainingTime) {
                 const ratio = remainingTime / stageDuration;
                 const interpolatedVolume = lastVolume + ratio * (stageVolume - lastVolume);
-                envelope.gain.linearRampToValueAtTime(
+                envelope.gain.exponentialRampToValueAtTime(
                     this.#noZeroVolume(volume * interpolatedVolume),
                     when + duration
                 );
@@ -233,18 +239,26 @@ export default class WebAudioFontPlayer {
             }
             lastTime += stageDuration;
             lastVolume = stageVolume;
-            envelope.gain.linearRampToValueAtTime(
+            envelope.gain.exponentialRampToValueAtTime(
                 this.#noZeroVolume(volume * lastVolume),
                 when + lastTime
             );
         }
-
-        envelope.gain.linearRampToValueAtTime(this.#noZeroVolume(0), when + duration + this.#afterTime);
+        envelope.gain.exponentialRampToValueAtTime(this.#nearZero, when + duration + this.#afterTime);
     }
 
 
     #findEnvelope(destinationNode) {
-        let envelope = this.#envelopes.find(e => e.target === this.#audioCtx.destination && this.#audioCtx.currentTime > e.when + e.duration + 0.001);
+        const target = destinationNode || this.#mainGain;
+        const now = this.#audioCtx.currentTime;
+        let envelope = this.#envelopes.find(e => e.target === target && now > e.when + e.duration + 0.05);
+        if (!envelope && this.#envelopes.length >= 64) {
+            const activeEnvelopes = this.#envelopes.filter(e => e.target === target);
+            if (activeEnvelopes.length > 0) {
+                activeEnvelopes.sort((a, b) => a.when - b.when);
+                envelope = activeEnvelopes[0];
+            }
+        }
         if (envelope) {
             if (envelope.audioBufferSourceNode) {
                 try {
@@ -253,22 +267,24 @@ export default class WebAudioFontPlayer {
                 } catch (e) { }
                 envelope.audioBufferSourceNode = null;
             }
+            envelope.gain.cancelScheduledValues(0);
+            envelope.gain.setValueAtTime(this.#nearZero, now);
         } else {
             envelope = this.#audioCtx.createGain();
             envelope.gain.value = 0;
-            const target = destinationNode || this.#mainGain;
             envelope.target = target;
             envelope.connect(target);
-            envelope.cancel = () => {
-                if (envelope.when + envelope.duration > this.#audioCtx.currentTime) {
-                    envelope.gain.cancelScheduledValues(0);
-                    envelope.gain.setTargetAtTime(this.#nearZero, this.#audioCtx.currentTime, 0.1);
-                    envelope.when = this.#audioCtx.currentTime + 0.00001;
-                    envelope.duration = 0;
-                }
-            };
             this.#envelopes.push(envelope);
         }
+        envelope.cancel = () => {
+            const currentTime = this.#audioCtx.currentTime;
+            if (envelope.when + envelope.duration > currentTime) {
+                envelope.gain.cancelScheduledValues(0);
+                envelope.gain.setTargetAtTime(this.#nearZero, currentTime, 0.02);
+                envelope.when = currentTime + 0.00001;
+                envelope.duration = 0;
+            }
+        };
         return envelope;
     }
 

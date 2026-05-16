@@ -1222,6 +1222,9 @@ var WebAudioFontPlayer = class {
   #nearZero = 1e-6;
   #bendRange = 2;
   #mainGain = null;
+  #volumeValue = 0.7;
+  #expressionValue = 1;
+  #expressionGain = null;
   #sustain = false;
   #pitchBendValue = 8192;
   #notesWaitingForSustain = /* @__PURE__ */ new Set();
@@ -1230,8 +1233,11 @@ var WebAudioFontPlayer = class {
     this.#compressor = compressor;
     this.#preset = preset;
     this.#mainGain = this.#audioCtx.createGain();
-    this.#mainGain.gain.setValueAtTime(0.7, this.#audioCtx.currentTime);
-    this.#mainGain.connect(this.#compressor.input);
+    this.#mainGain.gain.setValueAtTime(this.#volumeValue, this.#audioCtx.currentTime);
+    this.#expressionGain = this.#audioCtx.createGain();
+    this.#expressionGain.gain.setValueAtTime(this.#expressionValue, this.#audioCtx.currentTime);
+    this.#mainGain.connect(this.#expressionGain);
+    this.#expressionGain.connect(this.#compressor.input);
     this.#preset.zones.map((zone) => this.#adjustZone(zone));
   }
   get preset() {
@@ -1315,16 +1321,22 @@ var WebAudioFontPlayer = class {
         const bendCents = semitones * 100;
         const totalCents = originalPitchCents - baseDetuneCents + bendCents;
         const newRate = Math.pow(2, totalCents / 1200);
+        e.audioBufferSourceNode.playbackRate.cancelScheduledValues(now);
         e.audioBufferSourceNode.playbackRate.setTargetAtTime(newRate, now, 0.015);
       }
     });
   }
   setController(number, value) {
     const now = this.#audioCtx.currentTime;
+    const normalizedValue = Math.max(0, Math.min(127, value)) / 127;
     switch (number) {
       case 7:
-        const vol = value / 127;
-        this.#mainGain.gain.setTargetAtTime(vol, now, 0.05);
+        this.#volumeValue = normalizedValue;
+        this.#mainGain.gain.setTargetAtTime(this.#volumeValue, now, 0.05);
+        break;
+      case 11:
+        this.#expressionValue = normalizedValue;
+        this.#expressionGain.gain.setTargetAtTime(this.#expressionValue, now, 0.03);
         break;
       case 64:
         this.#sustain = value >= 64;
@@ -1363,7 +1375,7 @@ var WebAudioFontPlayer = class {
         },
         (error) => {
           console.error("Audio decoding error:", error);
-          console.warning(this.#preset);
+          console.warn(this.#preset);
           return false;
         }
       );
@@ -1381,7 +1393,7 @@ var WebAudioFontPlayer = class {
     zone.sampleRate = this.#numValue(zone.sampleRate, 44100);
   }
   #setupEnvelope(envelope, zone, volume, when, sampleDuration, noteDuration) {
-    envelope.gain.setValueAtTime(this.#noZeroVolume(0), this.#audioCtx.currentTime);
+    envelope.gain.setValueAtTime(this.#nearZero, this.#audioCtx.currentTime);
     const duration = Math.min(noteDuration, sampleDuration - this.#afterTime);
     const ahdsr = zone.ahdsr && zone.ahdsr.length > 0 ? zone.ahdsr : [
       { duration: 0, volume: 1 },
@@ -1389,7 +1401,7 @@ var WebAudioFontPlayer = class {
     ];
     envelope.gain.cancelScheduledValues(when);
     const initialVol = (ahdsr[0]?.volume ?? 1) * volume;
-    envelope.gain.setValueAtTime(this.#noZeroVolume(initialVol), when);
+    envelope.gain.linearRampToValueAtTime(this.#noZeroVolume(initialVol), when + 2e-3);
     let lastTime = 0;
     let lastVolume = ahdsr[0]?.volume ?? 1;
     for (const stage of ahdsr) {
@@ -1399,7 +1411,7 @@ var WebAudioFontPlayer = class {
       if (stageDuration > remainingTime) {
         const ratio = remainingTime / stageDuration;
         const interpolatedVolume = lastVolume + ratio * (stageVolume - lastVolume);
-        envelope.gain.linearRampToValueAtTime(
+        envelope.gain.exponentialRampToValueAtTime(
           this.#noZeroVolume(volume * interpolatedVolume),
           when + duration
         );
@@ -1407,15 +1419,24 @@ var WebAudioFontPlayer = class {
       }
       lastTime += stageDuration;
       lastVolume = stageVolume;
-      envelope.gain.linearRampToValueAtTime(
+      envelope.gain.exponentialRampToValueAtTime(
         this.#noZeroVolume(volume * lastVolume),
         when + lastTime
       );
     }
-    envelope.gain.linearRampToValueAtTime(this.#noZeroVolume(0), when + duration + this.#afterTime);
+    envelope.gain.exponentialRampToValueAtTime(this.#nearZero, when + duration + this.#afterTime);
   }
   #findEnvelope(destinationNode) {
-    let envelope = this.#envelopes.find((e) => e.target === this.#audioCtx.destination && this.#audioCtx.currentTime > e.when + e.duration + 1e-3);
+    const target = destinationNode || this.#mainGain;
+    const now = this.#audioCtx.currentTime;
+    let envelope = this.#envelopes.find((e) => e.target === target && now > e.when + e.duration + 0.05);
+    if (!envelope && this.#envelopes.length >= 64) {
+      const activeEnvelopes = this.#envelopes.filter((e) => e.target === target);
+      if (activeEnvelopes.length > 0) {
+        activeEnvelopes.sort((a, b) => a.when - b.when);
+        envelope = activeEnvelopes[0];
+      }
+    }
     if (envelope) {
       if (envelope.audioBufferSourceNode) {
         try {
@@ -1425,22 +1446,24 @@ var WebAudioFontPlayer = class {
         }
         envelope.audioBufferSourceNode = null;
       }
+      envelope.gain.cancelScheduledValues(0);
+      envelope.gain.setValueAtTime(this.#nearZero, now);
     } else {
       envelope = this.#audioCtx.createGain();
       envelope.gain.value = 0;
-      const target = destinationNode || this.#mainGain;
       envelope.target = target;
       envelope.connect(target);
-      envelope.cancel = () => {
-        if (envelope.when + envelope.duration > this.#audioCtx.currentTime) {
-          envelope.gain.cancelScheduledValues(0);
-          envelope.gain.setTargetAtTime(this.#nearZero, this.#audioCtx.currentTime, 0.1);
-          envelope.when = this.#audioCtx.currentTime + 1e-5;
-          envelope.duration = 0;
-        }
-      };
       this.#envelopes.push(envelope);
     }
+    envelope.cancel = () => {
+      const currentTime = this.#audioCtx.currentTime;
+      if (envelope.when + envelope.duration > currentTime) {
+        envelope.gain.cancelScheduledValues(0);
+        envelope.gain.setTargetAtTime(this.#nearZero, currentTime, 0.02);
+        envelope.when = currentTime + 1e-5;
+        envelope.duration = 0;
+      }
+    };
     return envelope;
   }
   #findZone(pitch) {
@@ -1497,11 +1520,11 @@ var AudioCompressor = class {
     this.#output = this.#audioCtx.createGain();
     this.#output.gain.setValueAtTime(volume, this.#audioCtx.currentTime);
     lastNode.connect(this.#output);
+    this.#output.connect(this.#limiter);
     lastNode.connect(this.#reverbNode);
     this.#reverbNode.connect(this.#reverbWet);
-    this.#reverbWet.connect(this.#output);
-    this.#output.connect(this.#limiter);
     this.#limiter.connect(this.#analyser);
+    this.#reverbWet.connect(this.#analyser);
     this.#analyser.connect(this.#audioCtx.destination);
   }
   get analyser() {
@@ -1535,10 +1558,10 @@ var AudioCompressor = class {
   }
   #bandEqualizer(from, frequency) {
     const filter = this.#audioCtx.createBiquadFilter();
-    filter.frequency.setTargetAtTime(frequency, 0, 1e-4);
     filter.type = "peaking";
-    filter.gain.setTargetAtTime(0, 0, 1e-4);
-    filter.Q.setTargetAtTime(1, 0, 1e-4);
+    filter.frequency.setValueAtTime(frequency, this.#audioCtx.currentTime);
+    filter.gain.setValueAtTime(0, this.#audioCtx.currentTime);
+    filter.Q.setValueAtTime(1, this.#audioCtx.currentTime);
     from.connect(filter);
     return filter;
   }
@@ -1546,15 +1569,30 @@ var AudioCompressor = class {
     const sampleRate = this.#audioCtx.sampleRate;
     const length = sampleRate * duration;
     const impulse = this.#audioCtx.createBuffer(2, length, sampleRate);
+    const preDelayTime = 0.015;
+    const preDelaySamples = Math.floor(preDelayTime * sampleRate);
     for (let channel = 0; channel < impulse.numberOfChannels; channel++) {
       const data = impulse.getChannelData(channel);
       let lastValue = 0;
-      const filterCoef = 0.1;
+      const channelOffset = channel === 1 ? Math.floor(2e-3 * sampleRate) : 0;
       for (let i = 0; i < length; i++) {
+        if (i < preDelaySamples) {
+          data[i] = 0;
+          continue;
+        }
+        const t = (i - preDelaySamples) / sampleRate;
+        const envelope = Math.exp(-t * (decay / duration));
+        const dampingFactor = Math.max(0.01, 0.2 * Math.exp(-t * 2.5));
         const whiteNoise = Math.random() * 2 - 1;
-        const envelope = Math.exp(-i / (sampleRate * (duration / decay)));
-        lastValue = whiteNoise * filterCoef + lastValue * (1 - filterCoef);
-        data[i] = lastValue * envelope;
+        lastValue = whiteNoise * dampingFactor + lastValue * (1 - dampingFactor);
+        let sampleValue = lastValue * envelope;
+        if (t < 0.04) {
+          if (i % 123 === 0 || i % 234 === 0) {
+            sampleValue += (Math.random() * 2 - 1) * 0.2 * (0.04 - t) / 0.04;
+          }
+        }
+        if (i + channelOffset < length) data[i + channelOffset] = sampleValue;
+        else data[i] = sampleValue;
       }
     }
     this.#reverbNode.buffer = impulse;
@@ -1802,6 +1840,9 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
   set rever(rev) {
     this.#compressor.reverb = rev;
   }
+  async close() {
+    await this.#audioCtx.close();
+  }
   async getCatalog() {
     if (this.#catalog) return this.#catalog;
     const cachedata = this.#opts.localCache ? await indexeddbstorage_default.getItem("waf_catalog") : null;
@@ -1809,6 +1850,7 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
     else {
       this.#log(`Downloading catalog...`);
       const response = await fetch(`${_MidiAudioPlayer.ENDPOINT}catalog.json`);
+      if (!response.ok) throw new Error(`Impossible to download catalog: ${response.status}`);
       this.#catalog = await response.json();
       if (this.#opts.localCache) await indexeddbstorage_default.setItem("waf_catalog", JSON.stringify(this.#catalog));
     }
@@ -1863,6 +1905,7 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
     return this.#players;
   }
   async play(content = null) {
+    if (this.#audioCtx.state === "suspended") await this.#audioCtx.resume();
     if (content) await this.load(content);
     await Promise.all(Object.keys(this.#players).map(async (k) => await this.#players[k]?.cancelQueue()));
     this.#compressor.restoreReverb();
@@ -1897,13 +1940,9 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
     if (!this.totalTicks || !this.events) return "";
     const waveform = new Array(samples).fill(0);
     const tickInterval = this.totalTicks / samples;
-    const allEvents = [];
-    this.events.forEach((track) => track.forEach((event) => {
-      if (event.name === "Controller Change" || event.name === "Program Change" || event.name === "Note on" && event.velocity > 0) {
-        allEvents.push(event);
-      }
-    }));
-    allEvents.sort((a, b) => a.tick - b.tick);
+    const allEvents = this.events.flatMap((track) => track).filter(
+      (event) => event.name === "Controller Change" || event.name === "Program Change" || event.name === "Note on" && event.velocity > 0
+    ).sort((a, b) => a.tick - b.tick);
     const channelsVolume = new Array(16).fill(100);
     const channelsExpression = new Array(16).fill(127);
     const activeInstruments = new Array(16).fill(false);
@@ -1913,13 +1952,11 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
       if (idx >= samples) return;
       const chan = event.channel;
       if (event.name === "Program Change") {
-        if (chan !== void 0) {
-          activeInstruments[chan] = true;
-        }
+        if (chan !== void 0) activeInstruments[chan] = true;
       } else if (event.name === "Controller Change") {
         if (chan !== void 0) {
-          if (event.controllerType === 7) channelsVolume[chan] = event.value;
-          else if (event.controllerType === 11) channelsExpression[chan] = event.value;
+          if (event.number === 7) channelsVolume[chan] = event.value;
+          else if (event.number === 11) channelsExpression[chan] = event.value;
         }
       } else if (event.name === "Note on") {
         if (chan !== void 0 && activeInstruments[chan]) {
@@ -2135,7 +2172,6 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
         });
         break;
       case "Note on":
-        if (event.tick < this.getCurrentTick() - 10) return;
         if (event.noteNumber === void 0) return;
         if (event.velocity > 0 && event.velocity <= 127) {
           this.#stopNote(event.channel, event.noteNumber);
@@ -2145,10 +2181,11 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
           const finalVol = _MidiAudioPlayer.REFERENCE_GAIN * Math.pow(noteVelocityRatio, 2);
           const envelope = this.#players[event.channel]?.queueWaveTable(0, event.noteNumber, 2, finalVol);
           if (envelope) this.#addNote(event.channel, event.noteNumber, envelope);
-        } else this.#stopNote(event.channel, event.noteNumber);
+        } else {
+          this.#stopNote(event.channel, event.noteNumber);
+        }
         break;
       case "Note off":
-        if (event.tick < this.getCurrentTick() - 100) return;
         if (event.noteNumber === void 0) return;
         this.#stopNote(event.channel, event.noteNumber);
         break;
@@ -2170,32 +2207,27 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
   #addNote(channel, note, envelope) {
     if (!this.#activeNotes[channel]) this.#activeNotes[channel] = /* @__PURE__ */ new Map();
     this.#activeNotes[channel].set(note, envelope);
+    this.#updateChannelStates();
     const realDurationMs = (envelope.duration || 0) * 1e3;
-    const decayTime = Math.max(500, realDurationMs + 100);
-    setTimeout(() => {
+    envelope.cleanupTimer = setTimeout(() => {
       if (this.#activeNotes[channel]?.get(note) === envelope) {
         this.#activeNotes[channel].delete(note);
         this.#updateChannelStates();
       }
-    }, decayTime);
-    this.#updateChannelStates();
+    }, realDurationMs + 50);
   }
   #stopNote(channel, noteNumber) {
     const player = this.#players[channel];
     const envelope = this.#activeNotes[channel]?.get(noteNumber);
     if (envelope) {
-      if (player && player.isSustainActive()) {
-        player.registerSustainNote(() => {
-          envelope.cancel();
-          this.#activeNotes[channel]?.delete(noteNumber);
-          this.#updateChannelStates();
-        });
-      } else {
-        envelope.cancel();
+      if (envelope.cleanupTimer) clearTimeout(envelope.cleanupTimer);
+      const removeNoteFromRegistry = () => {
         this.#activeNotes[channel]?.delete(noteNumber);
-      }
+        this.#updateChannelStates();
+      };
+      if (player && player.isSustainActive()) player.registerSustainNote(() => envelope.cancel(removeNoteFromRegistry));
+      else envelope.cancel(removeNoteFromRegistry);
     }
-    this.#updateChannelStates();
   }
   #clearActiveNotes() {
     Object.keys(this.#activeNotes).map((channel) => {
@@ -2209,11 +2241,18 @@ var MidiAudioPlayer = class _MidiAudioPlayer extends index.Player {
     this.#updateChannelStates();
   }
   #updateChannelStates() {
-    const channelStates = structuredClone(this.#channelStates);
-    Object.keys(this.#activeNotes).forEach((channel) => channelStates[channel] = Boolean(this.#activeNotes[channel].size));
-    if (channelStates != this.#channelStates) {
-      this.#channelStates = channelStates;
-      if (Object.values(this.#channelStates).length) this.triggerPlayerEvent("channelState", this.#channelStates);
+    let hasChanged = false;
+    const nextStates = {};
+    Object.keys(this.#players).forEach((channel) => {
+      const isActive = Boolean(this.#activeNotes[channel]?.size);
+      nextStates[channel] = isActive;
+      if (this.#channelStates[channel] !== isActive) {
+        hasChanged = true;
+      }
+    });
+    if (hasChanged) {
+      this.#channelStates = nextStates;
+      this.triggerPlayerEvent("channelState", this.#channelStates);
     }
   }
   #log(str, err = false) {

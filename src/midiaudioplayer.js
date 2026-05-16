@@ -57,6 +57,11 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
     set rever(rev) { this.#compressor.reverb = rev; }
 
 
+    async close() {
+        await this.#audioCtx.close();
+    }
+
+
     async getCatalog() {
         if(this.#catalog) return this.#catalog;
         const cachedata = this.#opts.localCache ? await indexedDbStorage.getItem('waf_catalog') : null;
@@ -64,6 +69,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         else {
             this.#log(`Downloading catalog...`);
             const response = await fetch(`${MidiAudioPlayer.ENDPOINT}catalog.json`);
+            if (!response.ok) throw new Error(`Impossible to download catalog: ${response.status}`);
             this.#catalog = await response.json();
             if(this.#opts.localCache) await indexedDbStorage.setItem('waf_catalog', JSON.stringify(this.#catalog));
         }
@@ -126,6 +132,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
 
 
 	async play(content = null) {
+        if (this.#audioCtx.state === 'suspended') await this.#audioCtx.resume();
 		if(content) await this.load(content);
         await Promise.all(Object.keys(this.#players).map(async k => await this.#players[k]?.cancelQueue()));
         this.#compressor.restoreReverb();
@@ -170,34 +177,33 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         if (!this.totalTicks || !this.events) return '';
         const waveform = new Array(samples).fill(0);
         const tickInterval = this.totalTicks / samples;
-        const allEvents = [];
-        this.events.forEach(track => track.forEach(event => {
-            if (
+
+        const allEvents = this.events
+            .flatMap(track => track)
+            .filter(event =>
                 event.name === 'Controller Change' ||
                 event.name === 'Program Change' ||
                 (event.name === 'Note on' && event.velocity > 0)
-            ) {
-                allEvents.push(event);
-            }
-        }));
-        allEvents.sort((a, b) => a.tick - b.tick);
+            )
+            .sort((a, b) => a.tick - b.tick);
+
         const channelsVolume = new Array(16).fill(100);
         const channelsExpression = new Array(16).fill(127);
         const activeInstruments = new Array(16).fill(false);
         activeInstruments[9] = true;
+
         allEvents.forEach(event => {
             const idx = Math.floor(event.tick / tickInterval);
             if (idx >= samples) return;
             const chan = event.channel;
+
             if (event.name === 'Program Change') {
-                if (chan !== undefined) {
-                    activeInstruments[chan] = true;
-                }
+                if (chan !== undefined) activeInstruments[chan] = true;
             }
             else if (event.name === 'Controller Change') {
                 if (chan !== undefined) {
-                    if (event.controllerType === 7) channelsVolume[chan] = event.value;
-                    else if (event.controllerType === 11) channelsExpression[chan] = event.value;
+                    if (event.number === 7) channelsVolume[chan] = event.value;
+                    else if (event.number === 11) channelsExpression[chan] = event.value;
                 }
             }
             else if (event.name === 'Note on') {
@@ -438,8 +444,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
                 });
                 break;
             case 'Note on':
-                if(event.tick < (this.getCurrentTick() - 10)) return;
-                if(event.noteNumber === undefined) return;
+                if (event.noteNumber === undefined) return;
                 if (event.velocity > 0 && event.velocity <= 127) {
                     this.#stopNote(event.channel, event.noteNumber);
                     const normalizedMaster = this.#opts.volume * 100 / 255;
@@ -447,12 +452,13 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
                     const noteVelocityRatio = event.velocity / 127;
                     const finalVol = MidiAudioPlayer.REFERENCE_GAIN * Math.pow(noteVelocityRatio, 2);
                     const envelope = this.#players[event.channel]?.queueWaveTable(0, event.noteNumber, 2, finalVol);
-                    if(envelope) this.#addNote(event.channel, event.noteNumber, envelope)
-                } else this.#stopNote(event.channel, event.noteNumber);
+                    if (envelope) this.#addNote(event.channel, event.noteNumber, envelope)
+                } else {
+                    this.#stopNote(event.channel, event.noteNumber);
+                }
                 break;
             case 'Note off':
-                if(event.tick < (this.getCurrentTick() - 100)) return;
-                if(event.noteNumber === undefined) return;
+                if (event.noteNumber === undefined) return;
                 this.#stopNote(event.channel, event.noteNumber);
                 break;
             case 'Controller Change':
@@ -475,15 +481,14 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
     #addNote(channel, note, envelope) {
         if (!this.#activeNotes[channel]) this.#activeNotes[channel] = new Map();
         this.#activeNotes[channel].set(note, envelope);
+        this.#updateChannelStates();
         const realDurationMs = (envelope.duration || 0) * 1000;
-        const decayTime = Math.max(500, realDurationMs + 100);
-        setTimeout(() => {
+        envelope.cleanupTimer = setTimeout(() => {
             if (this.#activeNotes[channel]?.get(note) === envelope) {
                 this.#activeNotes[channel].delete(note);
                 this.#updateChannelStates();
             }
-        }, decayTime);
-        this.#updateChannelStates();
+        }, realDurationMs + 50);
     }
 
 
@@ -491,18 +496,14 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         const player = this.#players[channel];
         const envelope = this.#activeNotes[channel]?.get(noteNumber);
         if (envelope) {
-            if (player && player.isSustainActive()) {
-                player.registerSustainNote(() => {
-                    envelope.cancel();
-                    this.#activeNotes[channel]?.delete(noteNumber);
-                    this.#updateChannelStates();
-                });
-            } else {
-                envelope.cancel();
+            if (envelope.cleanupTimer) clearTimeout(envelope.cleanupTimer);
+            const removeNoteFromRegistry = () => {
                 this.#activeNotes[channel]?.delete(noteNumber);
-            }
+                this.#updateChannelStates();
+            };
+            if (player && player.isSustainActive()) player.registerSustainNote(() => envelope.cancel(removeNoteFromRegistry));
+            else envelope.cancel(removeNoteFromRegistry);
         }
-        this.#updateChannelStates();
     }
 
 
@@ -520,11 +521,18 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
 
 
     #updateChannelStates() {
-        const channelStates = structuredClone(this.#channelStates);
-        Object.keys(this.#activeNotes).forEach(channel => channelStates[channel] = Boolean(this.#activeNotes[channel].size));
-        if(channelStates != this.#channelStates) {
-            this.#channelStates = channelStates;
-            if(Object.values(this.#channelStates).length) this.triggerPlayerEvent('channelState', this.#channelStates);
+        let hasChanged = false;
+        const nextStates = {};
+        Object.keys(this.#players).forEach(channel => {
+            const isActive = Boolean(this.#activeNotes[channel]?.size);
+            nextStates[channel] = isActive;
+            if (this.#channelStates[channel] !== isActive) {
+                hasChanged = true;
+            }
+        });
+        if (hasChanged) {
+            this.#channelStates = nextStates;
+            this.triggerPlayerEvent('channelState', this.#channelStates);
         }
     }
 

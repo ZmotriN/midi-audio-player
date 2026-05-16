@@ -41,12 +41,11 @@ export default class AudioCompressor {
         this.#output.gain.setValueAtTime(volume, this.#audioCtx.currentTime);
 
         lastNode.connect(this.#output);
+        this.#output.connect(this.#limiter);
         lastNode.connect(this.#reverbNode);
         this.#reverbNode.connect(this.#reverbWet);
-        this.#reverbWet.connect(this.#output); 
-
-        this.#output.connect(this.#limiter);
         this.#limiter.connect(this.#analyser);
+        this.#reverbWet.connect(this.#analyser);
         this.#analyser.connect(this.#audioCtx.destination);
     }
 
@@ -79,10 +78,10 @@ export default class AudioCompressor {
 
     #bandEqualizer(from, frequency) {
         const filter = this.#audioCtx.createBiquadFilter();
-        filter.frequency.setTargetAtTime(frequency, 0, 0.0001);
         filter.type = "peaking";
-        filter.gain.setTargetAtTime(0, 0, 0.0001);
-        filter.Q.setTargetAtTime(1.0, 0, 0.0001);
+        filter.frequency.setValueAtTime(frequency, this.#audioCtx.currentTime);
+        filter.gain.setValueAtTime(0, this.#audioCtx.currentTime);
+        filter.Q.setValueAtTime(1.0, this.#audioCtx.currentTime);
         from.connect(filter);
         return filter;
     }
@@ -92,15 +91,30 @@ export default class AudioCompressor {
         const sampleRate = this.#audioCtx.sampleRate;
         const length = sampleRate * duration;
         const impulse = this.#audioCtx.createBuffer(2, length, sampleRate);
+        const preDelayTime = 0.015;
+        const preDelaySamples = Math.floor(preDelayTime * sampleRate);
         for (let channel = 0; channel < impulse.numberOfChannels; channel++) {
             const data = impulse.getChannelData(channel);
             let lastValue = 0;
-            const filterCoef = 0.1;
+            const channelOffset = channel === 1 ? Math.floor(0.002 * sampleRate) : 0;
             for (let i = 0; i < length; i++) {
+                if (i < preDelaySamples) {
+                    data[i] = 0;
+                    continue;
+                }
+                const t = (i - preDelaySamples) / sampleRate;
+                const envelope = Math.exp(-t * (decay / duration));
+                const dampingFactor = Math.max(0.01, 0.2 * Math.exp(-t * 2.5));
                 const whiteNoise = (Math.random() * 2 - 1);
-                const envelope = Math.exp(-i / (sampleRate * (duration / decay)));
-                lastValue = (whiteNoise * filterCoef) + (lastValue * (1 - filterCoef));
-                data[i] = lastValue * envelope;
+                lastValue = (whiteNoise * dampingFactor) + (lastValue * (1 - dampingFactor));
+                let sampleValue = lastValue * envelope;
+                if (t < 0.04) {
+                    if ((i % 123 === 0) || (i % 234 === 0)) {
+                        sampleValue += (Math.random() * 2 - 1) * 0.2 * (0.04 - t) / 0.04;
+                    }
+                }
+                if (i + channelOffset < length) data[i + channelOffset] = sampleValue;
+                else data[i] = sampleValue;
             }
         }
         this.#reverbNode.buffer = impulse;
