@@ -1455,11 +1455,19 @@
         envelope.connect(target);
         this.#envelopes.push(envelope);
       }
-      envelope.cancel = () => {
+      envelope.cancel = (force = false) => {
         const currentTime = this.#audioCtx.currentTime;
+        if (force && envelope.audioBufferSourceNode) {
+          try {
+            envelope.audioBufferSourceNode.stop(0);
+            envelope.audioBufferSourceNode.disconnect();
+          } catch (e) {
+          }
+          envelope.audioBufferSourceNode = null;
+        }
         if (envelope.when + envelope.duration > currentTime) {
           envelope.gain.cancelScheduledValues(0);
-          envelope.gain.setTargetAtTime(this.#nearZero, currentTime, 0.02);
+          envelope.gain.setTargetAtTime(this.#nearZero, currentTime, force ? 5e-3 : 0.02);
           envelope.when = currentTime + 1e-5;
           envelope.duration = 0;
         }
@@ -2225,15 +2233,20 @@
           this.#activeNotes[channel]?.delete(noteNumber);
           this.#updateChannelStates();
         };
-        if (player && player.isSustainActive()) player.registerSustainNote(() => envelope.cancel(removeNoteFromRegistry));
-        else envelope.cancel(removeNoteFromRegistry);
+        if (player && player.isSustainActive()) {
+          player.registerSustainNote(() => envelope.cancel(false));
+        } else {
+          envelope.cancel(false);
+        }
+        removeNoteFromRegistry();
       }
     }
     #clearActiveNotes() {
-      Object.keys(this.#activeNotes).map((channel) => {
+      Object.keys(this.#activeNotes).forEach((channel) => {
         this.#activeNotes[channel].forEach((envelope, note) => {
-          if (envelope && envelope.cancel) {
-            envelope.cancel();
+          if (envelope) {
+            if (envelope.cleanupTimer) clearTimeout(envelope.cleanupTimer);
+            if (envelope.cancel) envelope.cancel(true);
           }
           this.#activeNotes[channel]?.delete(note);
         });
@@ -2244,11 +2257,9 @@
       let hasChanged = false;
       const nextStates = {};
       Object.keys(this.#players).forEach((channel) => {
-        const isActive = Boolean(this.#activeNotes[channel]?.size);
+        const isActive = Boolean(this.#activeNotes[channel]?.size && this.#activeNotes[channel].size > 0);
         nextStates[channel] = isActive;
-        if (this.#channelStates[channel] !== isActive) {
-          hasChanged = true;
-        }
+        if (this.#channelStates[channel] !== isActive) hasChanged = true;
       });
       if (hasChanged) {
         this.#channelStates = nextStates;

@@ -276,11 +276,18 @@ export default class WebAudioFontPlayer {
             envelope.connect(target);
             this.#envelopes.push(envelope);
         }
-        envelope.cancel = () => {
+        envelope.cancel = (force = false) => {
             const currentTime = this.#audioCtx.currentTime;
+            if (force && envelope.audioBufferSourceNode) {
+                try {
+                    envelope.audioBufferSourceNode.stop(0);
+                    envelope.audioBufferSourceNode.disconnect();
+                } catch (e) { }
+                envelope.audioBufferSourceNode = null;
+            }
             if (envelope.when + envelope.duration > currentTime) {
                 envelope.gain.cancelScheduledValues(0);
-                envelope.gain.setTargetAtTime(this.#nearZero, currentTime, 0.02);
+                envelope.gain.setTargetAtTime(this.#nearZero, currentTime, force ? 0.005 : 0.02);
                 envelope.when = currentTime + 0.00001;
                 envelope.duration = 0;
             }

@@ -492,6 +492,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
     }
 
 
+
     #stopNote(channel, noteNumber) {
         const player = this.#players[channel];
         const envelope = this.#activeNotes[channel]?.get(noteNumber);
@@ -501,17 +502,22 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
                 this.#activeNotes[channel]?.delete(noteNumber);
                 this.#updateChannelStates();
             };
-            if (player && player.isSustainActive()) player.registerSustainNote(() => envelope.cancel(removeNoteFromRegistry));
-            else envelope.cancel(removeNoteFromRegistry);
+            if (player && player.isSustainActive()) {
+                player.registerSustainNote(() => envelope.cancel(false));
+            } else {
+                envelope.cancel(false);
+            }
+            removeNoteFromRegistry();
         }
     }
 
 
     #clearActiveNotes() {
-        Object.keys(this.#activeNotes).map(channel => {
+        Object.keys(this.#activeNotes).forEach(channel => {
             this.#activeNotes[channel].forEach((envelope, note) => {
-                if (envelope && envelope.cancel) {
-                    envelope.cancel();
+                if (envelope) {
+                    if (envelope.cleanupTimer) clearTimeout(envelope.cleanupTimer);
+                    if (envelope.cancel) envelope.cancel(true);
                 }
                 this.#activeNotes[channel]?.delete(note);
             });
@@ -524,11 +530,9 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         let hasChanged = false;
         const nextStates = {};
         Object.keys(this.#players).forEach(channel => {
-            const isActive = Boolean(this.#activeNotes[channel]?.size);
+            const isActive = Boolean(this.#activeNotes[channel]?.size && this.#activeNotes[channel].size > 0);
             nextStates[channel] = isActive;
-            if (this.#channelStates[channel] !== isActive) {
-                hasChanged = true;
-            }
+            if (this.#channelStates[channel] !== isActive) hasChanged = true;
         });
         if (hasChanged) {
             this.#channelStates = nextStates;

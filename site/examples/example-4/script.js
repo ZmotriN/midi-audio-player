@@ -239,7 +239,7 @@ class programChooser {
 			player.play();
 
 
-			log('Ready');
+			log('Automatic play');
 		} catch(e) {
 			log('Error: Invalid file format.');
 		}
