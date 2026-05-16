@@ -1858,6 +1858,7 @@
     }
     async play(content = null) {
       if (content) await this.load(content);
+      await Promise.all(Object.keys(this.#players).map(async (k) => await this.#players[k]?.cancelQueue()));
       this.#compressor.restoreReverb();
       return await super.play();
     }
@@ -1869,9 +1870,11 @@
     }
     async stop(skipKill = false) {
       await super.stop();
-      if (!skipKill) this.#compressor.killReverbTail();
+      if (!skipKill) {
+        this.#compressor.killReverbTail();
+        await Promise.all(Object.keys(this.#players).map(async (k) => await this.#players[k]?.cancelQueue()));
+      }
       await this.#clearActiveNotes();
-      await Promise.all(Object.keys(this.#players).map(async (k) => await this.#players[k]?.cancelQueue()));
     }
     getRealTimeVolume() {
       const analyser = this.#compressor.analyser;
@@ -1983,14 +1986,34 @@
           totalEvents: this.totalEvents,
           channels: await this.#channels
         });
-      } else if (playerEvent == "endOfFile") {
-        requestAnimationFrame(() => setTimeout(() => {
-          super.stop(true);
-          super.triggerPlayerEvent(playerEvent, data);
-        }, 1));
-      } else {
-        super.triggerPlayerEvent(playerEvent, data);
+      } else super.triggerPlayerEvent(playerEvent, data);
+    }
+    playLoop(dryRun) {
+      if (this.inLoop) return;
+      if (!dryRun && this.endOfFile() && this.tick > 0) {
+        this.stop(true);
+        this.tick = 0;
+        queueMicrotask(() => this.triggerPlayerEvent("endOfFile"));
+        return;
       }
+      this.inLoop = true;
+      this.tick = this.getCurrentTick();
+      this.tracks.forEach((track) => {
+        const result = track.handleEvent(this.tick, dryRun);
+        if (!result) return;
+        const events = Array.isArray(result) ? result : [result];
+        events.forEach((event) => {
+          const { name, data, value } = event;
+          if (name === "Set Tempo") this.setTempo(data);
+          if (dryRun) {
+            if (name === "Program Change" && !this.instruments.includes(value)) {
+              this.instruments.push(value);
+            }
+          } else this.emitEvent(event);
+        });
+      });
+      if (!dryRun && this.isPlaying()) this.triggerPlayerEvent("playing", { tick: this.tick });
+      this.inLoop = false;
     }
     async getProgramInstruments(program) {
       const categories = await this.getCategories();
