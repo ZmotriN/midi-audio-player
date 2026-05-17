@@ -231,7 +231,7 @@ class programChooser {
 		btnplay.classList.add('active');
 		player.play();
 	});
-
+console.log(document.querySelector('.dnd'));
 
 	new DNDZone(document.querySelector('.dnd'), { onFileDrop: async file => {
 		if(!['mid', 'midi', 'kar'].includes(file.name.split('.').pop()?.toLowerCase()) || !file.size || file.size > 5242880) {
@@ -242,6 +242,7 @@ class programChooser {
 		document.querySelector('.waveform').classList.add('disabled');
 		document.querySelector('.programs').classList.add('disabled');
 		try {
+			log('File droped');
 			if(player.isPlaying()) player.stop(true);
 			const buffer = await file.arrayBuffer();
 			channels = await player.load(buffer);
@@ -265,7 +266,7 @@ class programChooser {
 
 			log('Automatic play');
 		} catch(e) {
-			log('Error: Invalid file format.');
+			log('Error: Invalid file format');
 		}
 	}});
 

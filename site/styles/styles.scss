@@ -224,16 +224,18 @@ main:has(section:first-child .controls) {
 }
 
 
-section:has(.dnd) {
+body:has(.dnd) {
 	--show: flex;
 	--opacity: 0;
+
+	// position: relative;
 	
 	&:hover:has(:not(.dnd.show)) {
 		--show: none;
 	}
 
 	& > .dnd {
-		position: absolute;
+		position: fixed;
 		inset: 0;
 		background-color: var(--color-pre);
 		border: 0.4rem dashed var(--color-second);
@@ -531,6 +533,8 @@ section:has(.controls) {
 	line-height: 1.2rem;
 	white-space: pre-wrap;
 	border-radius: 0.2rem;
+	pointer-events: none;
+	user-select: none;
 }
 
 .btn {

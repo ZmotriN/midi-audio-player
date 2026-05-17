@@ -437,17 +437,6 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
     async #handleMidiPipeline(event) {
         if(!this.isPlaying()) return;
         switch (event.name) {
-            case 'Text Event':
-                if(event.string.startsWith('@')) break;
-                if(!event.tick) break;
-                const text = /^[\\\/]/i.test(event.string) ? event.string.substring(1) : event.string;
-                this.triggerPlayerEvent('lyrics', {
-                    string: text,
-                    tick: event.tick,
-                    paragraphe: event.string.startsWith('\\'),
-                    line: event.string.startsWith('/')
-                });
-                break;
             case 'Note on':
                 if (event.tick < (this.tick - 100)) return;
                 if (event.noteNumber === undefined) return;
@@ -477,9 +466,8 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
             case 'Program Change':
                 if(event.channel == 10 || event.value === 247) break;
                 if(!this.#opts.presetAuto && !this.#opts.presetRandom) break;
-                if(this.#players[event.channel] !== undefined && this.#players[event.channel].preset.program != (event.value + 1)) {
+                if(this.#players[event.channel] !== undefined && this.#players[event.channel].preset.program != (event.value + 1))
                     this.#players[event.channel].preset = this.#instruments[event.value + 1];
-                }
                 break;
             case 'Karaoke Event':
                 this.triggerPlayerEvent('karaoke', event.text);
@@ -554,10 +542,18 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         const structure = { language: "", title: "", paragraphs: [] };
         let bestTrack = null;
         let maxTextEventsCount = 0;
-
         this.events.forEach(track => {
-            const textEventsInTrack = track.filter(e => e.name === 'Text Event' || e.name === 'Lyric Event');
-            const realLyricsCount = textEventsInTrack.filter(e => e.string && !e.string.startsWith('@')).length;
+            const textEventsInTrack = track.filter(e =>
+                e.name === 'Text Event' ||
+                e.name === 'Lyric Event' ||
+                e.name === 'Cue Point' ||
+                e.name === 'Marker' ||
+                e.name === 'Track Name'
+            );
+            const realLyricsCount = textEventsInTrack.filter(e => {
+                const textStr = e.string || e.text || "";
+                return textStr && !textStr.startsWith('@');
+            }).length;
             if (realLyricsCount > maxTextEventsCount) {
                 maxTextEventsCount = realLyricsCount;
                 bestTrack = textEventsInTrack;
@@ -573,8 +569,14 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         let lastBlockTick = 0;
 
         allTextEvents.forEach(event => {
-            let text = event.string || "";
+            let text = this.#decodeKaraokeString(event.string || "");
             if (!text) return;
+            if (/^Track-/i.test(text.trim()) ||
+                /^Piste/i.test(text.trim()) ||
+                text.trim() === "" ||
+                (event.tick === 0 && text.length > 20)) {
+                return;
+            }
             if (text.startsWith('@L')) {
                 structure.language = text.substring(2).trim();
                 return;
@@ -646,9 +648,10 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
     }
 
 
-
     async generateKaraokeFrames() {
+        this.#log('Extracting lyrics...');
         const lyrics = await this.extractLyrics();
+        this.#log('Generating karaoke frames...');
         if (!lyrics.paragraphs.length) {
             this.events[0].push({
                 text: `<span class="karaoke-intro"></span>`,
@@ -659,8 +662,6 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
             return;
         }
         this.#title = lyrics.title.replace(/ \/ /g, '<br>');
-        // this.triggerPlayerEvent('karaoke', `<span class="karaoke-title">${this.#title}</span>`);
-        // this.triggerPlayerEvent('karaoke', `<span class="karaoke-clear"></span>`);
         let lastFrameEnd = 0;
         const delayTicks = this.secondsToTicks(this.#opts.karaokeDelay);
         const threeSecondsInTicks = this.secondsToTicks(3);
@@ -750,7 +751,6 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
             const next = allBlocksInSong[index + 1];
             if (next) {
                 const tickDifference = next.block.tick - currentBlock.tick;
-
                 if (tickDifference > threeSecondsInTicks) {
                     let targetCleanupTick = currentBlock.tick + threeSecondsInTicks;
                     let targetClearTick = currentBlock.tick + sevenSecondsInTicks;
@@ -798,6 +798,19 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
             });
         }
         this.events[0] = this.events[0].sort((a, b) => a.tick - b.tick);
+    }
+
+
+    #decodeKaraokeString(str) {
+        if (!str) return '';
+        const bytes = new Uint8Array(str.length);
+        for (let i = 0; i < str.length; i++) bytes[i] = str.charCodeAt(i) & 0xff;
+        const decoder = new TextDecoder('windows-1252');
+        let decoded = decoder.decode(bytes);
+        decoded = decoded.replace(/ÿ/g, '');
+        decoded = decoded.replace(/’/g, "'");
+        decoded = decoded.replace(/`/g, "'");
+        return decoded;
     }
 
 
