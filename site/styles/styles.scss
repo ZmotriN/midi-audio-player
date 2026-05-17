@@ -29,6 +29,13 @@ $color-bg:     #111827;
 $color-pre:    #322931; 
 
 
+@property --light-opacity {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+
 :root {
 
 	--color-main:       #{$color-main};
@@ -257,6 +264,9 @@ section:has(.dnd) {
 
 }
 
+
+
+section:has(.karaoke),
 section:has(.instruments),
 section:has(.controls) {
 	display: flex;
@@ -265,6 +275,51 @@ section:has(.controls) {
 	flex-direction: column;
 	row-gap: 1rem;
 }
+
+
+.karaoke {
+	position: relative;
+	display: flex;
+	padding: 1rem;
+	justify-content: center;
+	align-items: center;
+	text-align: center;
+	// width: 80%;
+	width: 100%;
+	background-color: var(--color-pre);
+	line-height: 2.2rem;
+	min-height: 15rem;
+	user-select: none;
+	font-size: 1.1rem;
+	font-weight: 600;
+	text-shadow: 0 0 0.4rem black, 0 0 0.2rem black, 0 0 0.1rem black;
+
+	.karaoke-intro::before {
+		content: "Karaoke🎤";
+		font-size: 3rem;
+	}
+
+	.karaoke-clear::before {
+		content: "🎵";
+		font-size: 3rem;
+	}
+
+	.karaoke-title {
+		font-size: 1.5rem;
+		font-weight: 700;
+	}
+
+	.karaoke-played {
+		color: var(--color-second);
+	}
+
+	.karaoke-playing {
+		color: var(--color-third);
+		// font-weight: 700;
+	}
+
+}
+
 
 .controls {
 	position: relative;
@@ -564,23 +619,13 @@ section:has(.controls) {
 			border-radius: 100%;
 			overflow: hidden;
 
-			
-
 			&::after {
 				content: "";
 				position: absolute;
 				inset: 0;
 				background-color: var(--color-second);
-				opacity: 0;
-				transition: opacity 250ms ease-out;
+				opacity: var(--light-opacity, 0);
 			}
-
-
-			&.active::after {
-				transition: opacity 5ms ease-in;
-				opacity: 1;
-			}
-
 		}
 
 

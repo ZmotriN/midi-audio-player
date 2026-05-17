@@ -21,6 +21,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
     #instruments   = {};
     #players       = {};
     #channels      = {};
+    #title         = '';
 
 	#opts = {
         volume: 0.7,
@@ -30,6 +31,9 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         presetAuto: false,
         presetRandom: false,
         preferred: [],
+        karaoke: false,
+        karaokeDelay: 0,
+        muteExpression: false,
         presets: { [-1]: -1 },
 	};
 
@@ -47,6 +51,9 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         };
 		this.#audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         this.#compressor = new AudioCompressor(this.#audioCtx, this.#opts.volume, this.#opts.reverb);
+        if(this.#opts.karaoke) {
+            queueMicrotask(() => this.triggerPlayerEvent('karaoke', `<span class="karaoke-intro"></span>`));
+        }
 	}
 
     get channels() { return this.#players; }
@@ -55,6 +62,8 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
     set volume(vol) { this.#opts.volume = clamp(vol, 0, 1); this.#compressor.masterVolume = this.#opts.volume; }
     get rever() { return this.#compressor.reverb; }
     set rever(rev) { this.#compressor.reverb = rev; }
+    get muteExpression() { return this.#opts.muteExpression; }
+    set muteExpression(val) { this.#opts.muteExpression = Boolean(val); }
 
 
     async close() {
@@ -92,6 +101,10 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
             this.#log(`Downloading preset ${id}...`);
             const response = await fetch(`${MidiAudioPlayer.ENDPOINT}presets/${id}.json`);
             const preset = await response.json();
+            if(preset.zones === undefined) {
+                console.error(`Invalid preset: ${$id}`);
+                throw new Error(`Invalid preset: ${$id}`);
+            }
             if(this.#opts.localCache) await indexedDbStorage.setItem(cacheid, JSON.stringify(preset));
             return preset;
         } catch(e) {
@@ -103,6 +116,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
     async load(content) {
 		if(this.isPlaying()) this.stop();
 		this.#clearActiveNotes();
+        Object.values(this.#players).map(async player => player.close());
         this.#players = {};
         this.#instruments = {};
         this.#activeNotes = {};
@@ -124,6 +138,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
             this.#instruments[program] = preset;
         }));
         await Promise.all(Object.keys(this.#channels).map(async channel => {
+            if(this.#players[channel]) this.#players[channel].close();
             this.#players[channel] = await this.#createWebAudioFontPlayer(this.#instruments[this.#channels[channel]]);
         }));
         super.triggerPlayerEvent('presetsLoaded', this.#instruments);
@@ -155,6 +170,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
             await Promise.all(Object.keys(this.#players).map(async k => await this.#players[k]?.cancelQueue()));
         }
         await this.#clearActiveNotes();
+        if(this.#opts.karaoke) this.triggerPlayerEvent('karaoke', `<span class="karaoke-intro"></span>`);
 	}
 
 
@@ -177,42 +193,36 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         if (!this.totalTicks || !this.events) return '';
         const waveform = new Array(samples).fill(0);
         const tickInterval = this.totalTicks / samples;
-
         const allEvents = this.events
-            .flatMap(track => track)
+            .flatMap((track, trackIdx) =>
+                track.map(event => ({
+                    ...event,
+                    computedChannel: event.channel !== undefined ? event.channel : trackIdx
+                }))
+            )
             .filter(event =>
                 event.name === 'Controller Change' ||
                 event.name === 'Program Change' ||
                 (event.name === 'Note on' && event.velocity > 0)
             )
             .sort((a, b) => a.tick - b.tick);
-
-        const channelsVolume = new Array(16).fill(100);
-        const channelsExpression = new Array(16).fill(127);
-        const activeInstruments = new Array(16).fill(false);
-        activeInstruments[9] = true;
-
+        const channelsVolume = new Map();
+        const channelsExpression = new Map();
         allEvents.forEach(event => {
             const idx = Math.floor(event.tick / tickInterval);
             if (idx >= samples) return;
-            const chan = event.channel;
-
-            if (event.name === 'Program Change') {
-                if (chan !== undefined) activeInstruments[chan] = true;
-            }
-            else if (event.name === 'Controller Change') {
-                if (chan !== undefined) {
-                    if (event.number === 7) channelsVolume[chan] = event.value;
-                    else if (event.number === 11) channelsExpression[chan] = event.value;
-                }
+            const chan = event.computedChannel;
+            if (!channelsVolume.has(chan)) channelsVolume.set(chan, 100);
+            if (!channelsExpression.has(chan)) channelsExpression.set(chan, 127);
+            if (event.name === 'Controller Change') {
+                if (event.number === 7) channelsVolume.set(chan, event.value);
+                else if (event.number === 11) channelsExpression.set(chan, event.value);
             }
             else if (event.name === 'Note on') {
-                if (chan !== undefined && activeInstruments[chan]) {
-                    const volFactor = channelsVolume[chan] / 127;
-                    const expFactor = channelsExpression[chan] / 127;
-                    const modulatedVelocity = event.velocity * volFactor * expFactor;
-                    waveform[idx] += modulatedVelocity;
-                }
+                const volFactor = channelsVolume.get(chan) / 127;
+                const expFactor = channelsExpression.get(chan) / 127;
+                const modulatedVelocity = event.velocity * volFactor * expFactor;
+                waveform[idx] += modulatedVelocity;
             }
         });
         const maxAmp = waveform.reduce((max, val) => {
@@ -232,46 +242,11 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
     }
 
 
-    async extractLyrics() {
-        const structure = { language: "", title: "", paragraphs: [{ lines: [{ blocks: [] }] }] };
-        let currentPara = structure.paragraphs[0];
-        let currentLine = currentPara.lines[0];
-        this.events.forEach(track => {
-            track.forEach(event => {
-                if (event.name === 'Text Event' || event.name === 'Lyric Event') {
-                    let text = event.string;
-                    if (text.startsWith('@L')) structure.language = text.substring(2);
-                    if (text.startsWith('@T')) structure.title += (structure.title ? ' / ' : '') + text.substring(2);
-                    if (text.startsWith('\\')) {
-                        const newPara = { tick: event.tick, lines: [{ blocks: [] }] };
-                        structure.paragraphs.push(newPara);
-                        currentPara = newPara;
-                        currentLine = currentPara.lines[0];
-                        text = text.substring(1);
-                    }
-                    if (text.startsWith('/')) {
-                        const newLine = { tick: event.tick, blocks: [] };
-                        currentPara.lines.push(newLine);
-                        currentLine = newLine;
-                        text = text.substring(1);
-                    }
-                    if(!event.tick) return;
-                    if (text.length > 0) {
-                        currentLine.blocks.push({
-                            text: text,
-                            tick: event.tick
-                        });
-                    }
-                }
-            });
-        });
-        structure.paragraphs = structure.paragraphs.filter(p => p.lines.some(l => l.blocks.length > 0));
-        return structure;
-    }
-
-
     async triggerPlayerEvent(playerEvent, data) {
         if(playerEvent == 'fileLoaded') {
+            if(this.#opts.karaoke) {
+                await this.generateKaraokeFrames();
+            }
             super.triggerPlayerEvent(playerEvent, {
                 tempo: this.tempo,
                 division: this.division,
@@ -281,6 +256,9 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
                 totalEvents: this.totalEvents,
                 channels: await this.#channels,
             });
+        } else if(playerEvent == 'endOfFile' && this.#opts.karaoke) {
+            queueMicrotask(() => this.triggerPlayerEvent('karaoke', `<span class="karaoke-intro"></span>`));
+            super.triggerPlayerEvent(playerEvent, data);
         } else super.triggerPlayerEvent(playerEvent, data);
     }
 
@@ -315,6 +293,12 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
 
 
     ticksToSeconds(startTick, endTick) {
+        // Si endTick n'est pas défini, on assume que startTick est la cible depuis le début (0)
+        if (endTick === undefined) {
+            endTick = startTick;
+            startTick = 0;
+        }
+
         if (startTick >= endTick) return 0;
         let seconds = 0;
         const len = this.tempoMap.length;
@@ -322,6 +306,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         let low = 0;
         let high = len - 1;
         let startIndex = 0;
+
         while (low <= high) {
             const mid = (low + high) >> 1;
             if (this.tempoMap[mid].tick <= startTick) {
@@ -331,6 +316,7 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
                 high = mid - 1;
             }
         }
+
         let currentTick = startTick;
         for (let i = startIndex; i < len; i++) {
             const entry = this.tempoMap[i];
@@ -342,10 +328,12 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
             seconds += ((segEnd - segStart) / entry.tempo) * timeFactor;
             currentTick = segEnd;
         }
+
         if (currentTick < endTick) {
             const lastEntry = this.tempoMap[len - 1];
             seconds += ((endTick - currentTick) / lastEntry.tempo) * timeFactor;
         }
+
         return seconds;
     }
 
@@ -368,6 +356,14 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
     }
 
 
+    getTickBeforeSeconds(targetTick, seconds) {
+        if (targetTick <= 0) return 0;
+        const targetTime = this.ticksToSeconds(0, targetTick);
+        const desiredTime = Math.max(0, targetTime - seconds);
+        return this.secondsToTicks(desiredTime);
+    }
+
+
     async getProgramInstruments(program) {
         const categories = await this.getCategories();
         let instruments = [];
@@ -378,14 +374,23 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
 
     async #getInstruments() {
         const instrumentMap = {};
+        const channelUsed = new Set();
         this.events.forEach(track => {
             track.forEach(event => {
                 if (event.name === 'Program Change' && (event.value + 1) <= 128) {
                     if(instrumentMap[event.channel]) return;
                     else if(event.channel == 10) instrumentMap[event.channel] = -1;
                     else instrumentMap[event.channel] = event.value + 1;
+                }  else if (event.name === 'Note on' && event.channel == 10) {
+                    instrumentMap[event.channel] = -1;
+                    channelUsed.add(10);
+                } else if(event.name === 'Note on') {
+                    channelUsed.add(event.channel);
                 }
             });
+        });
+        Object.keys(instrumentMap).forEach(channel => {
+            if(!channelUsed.has(Number(channel))) delete instrumentMap[channel];
         });
         return instrumentMap;
     }
@@ -395,9 +400,9 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
         const instrumentMap = new Set();
         this.events.forEach(track => {
             track.forEach(event => {
-                if (event.name === 'Program Change' && (event.value + 1) <= 128) {
+                if (event.name === 'Program Change') {
                     instrumentMap.add(event.channel == 10 ? -1 : (event.value + 1));
-                }
+                } else if (event.name === 'Note on' && event.channel == 10) instrumentMap.add(-1);
             });
         });
         return instrumentMap;
@@ -444,7 +449,9 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
                 });
                 break;
             case 'Note on':
+                if (event.tick < (this.tick - 100)) return;
                 if (event.noteNumber === undefined) return;
+                if (event.channel == 4 && this.#opts.muteExpression) return;
                 if (event.velocity > 0 && event.velocity <= 127) {
                     this.#stopNote(event.channel, event.noteNumber);
                     const normalizedMaster = this.#opts.volume * 100 / 255;
@@ -468,11 +475,14 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
                 this.#players[event.channel]?.setPitchBend?.(event.value);
                 break;
             case 'Program Change':
-                if(event.channel == 10) break;
+                if(event.channel == 10 || event.value === 247) break;
                 if(!this.#opts.presetAuto && !this.#opts.presetRandom) break;
-                if(this.#players[event.channel].preset.program != (event.value + 1)) {
+                if(this.#players[event.channel] !== undefined && this.#players[event.channel].preset.program != (event.value + 1)) {
                     this.#players[event.channel].preset = this.#instruments[event.value + 1];
                 }
+                break;
+            case 'Karaoke Event':
+                this.triggerPlayerEvent('karaoke', event.text);
                 break;
         }
     }
@@ -490,7 +500,6 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
             }
         }, realDurationMs + 50);
     }
-
 
 
     #stopNote(channel, noteNumber) {
@@ -538,6 +547,257 @@ export default class MidiAudioPlayer extends MidiPlayer.Player {
             this.#channelStates = nextStates;
             this.triggerPlayerEvent('channelState', this.#channelStates);
         }
+    }
+
+
+    async extractLyrics() {
+        const structure = { language: "", title: "", paragraphs: [] };
+        let bestTrack = null;
+        let maxTextEventsCount = 0;
+
+        this.events.forEach(track => {
+            const textEventsInTrack = track.filter(e => e.name === 'Text Event' || e.name === 'Lyric Event');
+            const realLyricsCount = textEventsInTrack.filter(e => e.string && !e.string.startsWith('@')).length;
+            if (realLyricsCount > maxTextEventsCount) {
+                maxTextEventsCount = realLyricsCount;
+                bestTrack = textEventsInTrack;
+            }
+        });
+
+        if (!bestTrack || bestTrack.length === 0) return structure;
+        const allTextEvents = bestTrack.sort((a, b) => a.tick - b.tick);
+
+        let paragraphs = [];
+        let currentParaLines = [];
+        let currentLineBlocks = [];
+        let lastBlockTick = 0;
+
+        allTextEvents.forEach(event => {
+            let text = event.string || "";
+            if (!text) return;
+            if (text.startsWith('@L')) {
+                structure.language = text.substring(2).trim();
+                return;
+            }
+            if (text.startsWith('@T')) {
+                structure.title += (structure.title ? ' / ' : '') + text.substring(2).trim();
+                return;
+            }
+            if (text.startsWith('@') ||
+                text.startsWith('(') ||
+                text.startsWith('PART') ||
+                /^\d+\s+\d+/.test(text.trim())) {
+                return;
+            }
+            const isNewParagraphMarker = text.startsWith('\\');
+            const isNewLineMarker = text.startsWith('/');
+            if (isNewParagraphMarker || isNewLineMarker) {
+                text = text.substring(1);
+            }
+            text = text.replace(/[\r\n]/g, "");
+            let isTimeGapTrigger = false;
+            if (lastBlockTick > 0 && event.tick > lastBlockTick) {
+                const secondsSilence = this.ticksToSeconds(lastBlockTick, event.tick);
+                if (secondsSilence > 2.5) {
+                    isTimeGapTrigger = true;
+                }
+            }
+            if (isNewLineMarker || isNewParagraphMarker || isTimeGapTrigger) {
+                if (currentLineBlocks.length > 0) {
+                    currentParaLines.push({
+                        tick: currentLineBlocks[0].tick,
+                        blocks: currentLineBlocks
+                    });
+                    currentLineBlocks = [];
+                }
+                if (currentParaLines.length > 0) {
+                    const isMaxLinesReached = currentParaLines.length >= 4;
+                    if (isNewParagraphMarker || isTimeGapTrigger || isMaxLinesReached) {
+                        paragraphs.push({
+                            tick: currentParaLines[0].tick,
+                            lines: currentParaLines
+                        });
+                        currentParaLines = [];
+                    }
+                }
+            }
+            if (text.length > 0) {
+                currentLineBlocks.push({
+                    text: text,
+                    tick: event.tick
+                });
+                lastBlockTick = event.tick;
+            }
+        });
+        if (currentLineBlocks.length > 0) {
+            currentParaLines.push({
+                tick: currentLineBlocks[0].tick,
+                blocks: currentLineBlocks
+            });
+        }
+        if (currentParaLines.length > 0) {
+            paragraphs.push({
+                tick: currentParaLines[0].tick,
+                lines: currentParaLines
+            });
+        }
+        structure.paragraphs = paragraphs;
+        return structure;
+    }
+
+
+
+    async generateKaraokeFrames() {
+        const lyrics = await this.extractLyrics();
+        if (!lyrics.paragraphs.length) {
+            this.events[0].push({
+                text: `<span class="karaoke-intro"></span>`,
+                name: 'Karaoke Event',
+                tick: 0,
+            });
+            this.events[0] = this.events[0].sort((a, b) => a.tick - b.tick);
+            return;
+        }
+        this.#title = lyrics.title.replace(/ \/ /g, '<br>');
+        // this.triggerPlayerEvent('karaoke', `<span class="karaoke-title">${this.#title}</span>`);
+        // this.triggerPlayerEvent('karaoke', `<span class="karaoke-clear"></span>`);
+        let lastFrameEnd = 0;
+        const delayTicks = this.secondsToTicks(this.#opts.karaokeDelay);
+        const threeSecondsInTicks = this.secondsToTicks(3);
+        const fiveSecondsInTicks = this.secondsToTicks(5);
+        const sevenSecondsInTicks = this.secondsToTicks(7);
+        const tenSecondsInTicks = this.secondsToTicks(10);
+        const allBlocksInSong = [];
+        lyrics.paragraphs.forEach((p, pIdx) => {
+            p.lines.forEach((l, lIdx) => {
+                l.blocks.forEach(b => {
+                    allBlocksInSong.push({
+                        block: b,
+                        lineIdx: lIdx,
+                        paraIdx: pIdx,
+                        paragraph: p,
+                        fastLinesText: p.lines.map(li => li.blocks.map(bl => bl.text).join(''))
+                    });
+                });
+            });
+        });
+        const paragraphDisplayTicks = [];
+        lyrics.paragraphs.forEach((p, pIdx) => {
+            let paragraphDisplayTick = this.getTickBeforeSeconds(p.tick, 5);
+            if (paragraphDisplayTick < lastFrameEnd) {
+                paragraphDisplayTick = lastFrameEnd + ((p.tick - lastFrameEnd) / 2);
+            }
+            if (pIdx === 0 && paragraphDisplayTick < 20) {
+                paragraphDisplayTick = 20;
+            }
+            paragraphDisplayTicks[pIdx] = paragraphDisplayTick;
+            const fastLinesText = p.lines.map(li => li.blocks.map(b => b.text).join(''));
+            const initialHTML = fastLinesText
+                .map(lineText => `<span class="karaoke-coming">${lineText}</span>`)
+                .join('<br/>');
+            this.events[0].push({
+                text: initialHTML,
+                name: 'Karaoke Event',
+                tick: paragraphDisplayTick,
+            });
+            if (p.lines.length > 0) {
+                const lastLine = p.lines[p.lines.length - 1];
+                if (lastLine.blocks.length > 0) {
+                    lastFrameEnd = lastLine.blocks[lastLine.blocks.length - 1].tick;
+                }
+            }
+        });
+        const firstParaDisplayTick = paragraphDisplayTicks[0] || 0;
+        if (firstParaDisplayTick > 25) {
+            this.events[0].push({
+                text: `<span class="karaoke-clear"></span>`,
+                name: 'Karaoke Event',
+                tick: 5,
+            });
+        }
+        allBlocksInSong.forEach((current, index) => {
+            const currentBlock = current.block;
+            const currentLineIdx = current.lineIdx;
+            const currentParaIdx = current.paraIdx;
+            const p = current.paragraph;
+            const fastLinesText = current.fastLinesText;
+            const generateHTML = (forceAllPlayedOnActiveLine = false) => {
+                return p.lines.map((li, liIdx) => {
+                    if (liIdx < currentLineIdx) {
+                        return `<span class="karaoke-played">${fastLinesText[liIdx]}</span>`;
+                    }
+                    if (liIdx > currentLineIdx) {
+                        return `<span class="karaoke-coming">${fastLinesText[liIdx]}</span>`;
+                    }
+                    let lineHTML = '';
+                    li.blocks.forEach(block => {
+                        let className = 'coming';
+                        if (forceAllPlayedOnActiveLine || block.tick < currentBlock.tick) {
+                            className = 'played';
+                        } else if (block.tick === currentBlock.tick) {
+                            className = 'playing';
+                        }
+                        lineHTML += `<span class="karaoke-${className}">${block.text}</span>`;
+                    });
+                    return lineHTML;
+                }).join('<br>');
+            };
+            this.events[0].push({
+                text: generateHTML(false),
+                name: 'Karaoke Event',
+                tick: currentBlock.tick - delayTicks,
+            });
+            const next = allBlocksInSong[index + 1];
+            if (next) {
+                const tickDifference = next.block.tick - currentBlock.tick;
+
+                if (tickDifference > threeSecondsInTicks) {
+                    let targetCleanupTick = currentBlock.tick + threeSecondsInTicks;
+                    let targetClearTick = currentBlock.tick + sevenSecondsInTicks;
+                    let shouldAddClear = tickDifference > tenSecondsInTicks && currentParaIdx > 0;
+                    if (next.paraIdx !== currentParaIdx) {
+                        const nextParaDisplayTick = paragraphDisplayTicks[next.paraIdx];
+                        if (targetCleanupTick >= nextParaDisplayTick) {
+                            targetCleanupTick = nextParaDisplayTick - 1;
+                        }
+                        if (shouldAddClear) {
+                            if (targetClearTick >= nextParaDisplayTick || (nextParaDisplayTick - targetClearTick) < threeSecondsInTicks) {
+                                shouldAddClear = false;
+                            }
+                        }
+                    }
+                    if (targetCleanupTick > currentBlock.tick) {
+                        this.events[0].push({
+                            text: generateHTML(true),
+                            name: 'Karaoke Event',
+                            tick: targetCleanupTick - delayTicks,
+                        });
+                    }
+                    if (shouldAddClear && targetClearTick > targetCleanupTick) {
+                        this.events[0].push({
+                            text: `<span class="karaoke-clear"></span>`,
+                            name: 'Karaoke Event',
+                            tick: targetClearTick - delayTicks,
+                        });
+                    }
+                }
+            }
+            lastFrameEnd = currentBlock.tick;
+        });
+        if ((this.totalTicks - lastFrameEnd) > this.secondsToTicks(5)) {
+            this.events[0].push({
+                text: `<span class="karaoke-clear"></span>`,
+                name: 'Karaoke Event',
+                tick: lastFrameEnd + this.secondsToTicks(5),
+            });
+        } else {
+            this.events[0].push({
+                text: `<span class="karaoke-clear"></span>`,
+                name: 'Karaoke Event',
+                tick: this.totalTicks - 1,
+            });
+        }
+        this.events[0] = this.events[0].sort((a, b) => a.tick - b.tick);
     }
 
 

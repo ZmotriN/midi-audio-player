@@ -41,6 +41,31 @@ export default class WebAudioFontPlayer {
     }
 
 
+    close() {
+        const now = this.#audioCtx.currentTime;
+        this.#envelopes.forEach(envelope => {
+            try {
+                envelope.gain.cancelScheduledValues(0);
+                if (envelope.audioBufferSourceNode) {
+                    envelope.audioBufferSourceNode.stop(now);
+                    envelope.audioBufferSourceNode.disconnect();
+                    envelope.audioBufferSourceNode = null;
+                }
+            } catch (e) {}
+            try { envelope.disconnect(); } catch (e) { }
+        });
+        this.#envelopes = [];
+        this.#notesWaitingForSustain.clear();
+        try { this.#mainGain.disconnect(); } catch (e) { }
+        try { this.#expressionGain.disconnect(); } catch (e) { }
+        this.#mainGain = null;
+        this.#expressionGain = null;
+        this.#preset = null;
+        this.#compressor = null;
+        this.#audioCtx = null;
+    }
+
+
     queueWaveTable(when, pitch, duration, volume, slides) {
         if (this.#audioCtx.state === 'suspended') this.#audioCtx.resume().catch(() => { });
         const vol = this.#limitVolume(volume);

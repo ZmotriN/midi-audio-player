@@ -46,8 +46,8 @@ class DNDZone {
 	async drop(e) {
 		e.preventDefault();
 		const files = e.dataTransfer.files;
-		if (files.length > 0) await this.opts.onFileDrop?.(e.dataTransfer.files[0]);
 		this.container.classList.remove('dragover');
+		if (files.length > 0) await this.opts.onFileDrop?.(e.dataTransfer.files[0]);
 	}
 
 }
@@ -61,6 +61,9 @@ class programChooser {
 	#presets = null;
 	#selpreset = null;
 	#light = null;
+	#active = false;
+	#currentAnimation = null;
+
 
 	constructor(parent, channel, presets, selpreset) {
 		this.#parent = parent;
@@ -90,10 +93,22 @@ class programChooser {
 
 
 	setActive(active) {
-		if(active) {
-			this.#light.classList.add('active');
+		if (active && !this.#active) {
+			this.#active = true;
+			if (this.#currentAnimation) this.#currentAnimation.cancel();
+			this.#currentAnimation = this.#light.animate(
+				[{ '--light-opacity': 0 }, { '--light-opacity': 1 }],
+				{ duration: 5, easing: 'ease-out', fill: 'forwards' }
+			);
+
+		} else if (!active && this.#active) {
+			this.#active = false;
+			if (this.#currentAnimation) this.#currentAnimation.cancel();
+			this.#currentAnimation = this.#light.animate(
+				[{ '--light-opacity': 1 }, { '--light-opacity': 0 }],
+				{ duration: 250, easing: 'ease-in', fill: 'forwards' }
+			);
 		}
-		else this.#light.classList.remove('active');
 	}
 
 
@@ -102,7 +117,10 @@ class programChooser {
 
 
 (async () => {
-	const song = '../../data/closer.mid';
+	// const song = '../../data/closer.mid';
+	const song = '../../data/screw.kar';
+
+	
 
 	const logs = document.querySelector('.logs');
 	const btnplay = document.querySelector('.btn.play');
@@ -173,6 +191,8 @@ class programChooser {
 		presetRandom: true,
 		presetAuto: true,
 		localCache: true,
+		karaoke: true,
+		muteExpression: false,
 		preferred: ["JCLive", "LesPaul", "Chaos"],
 		// presets: { [-1]: '12805_Chaos' }
 	});
@@ -192,8 +212,12 @@ class programChooser {
 		waveform.style.setProperty('--time', `"0:00"`);
 		waveform.style.setProperty('--duration', `"${formatTime(songInfos.duration)}"`);
 		document.querySelector('.waveform__container').innerHTML = svgCode;
+		// console.log(await player.extractLyrics());
 	});
 	player.on('logs', str => log(str));
+	player.on('karaoke', text => {
+		document.querySelector('section > div.karaoke').innerHTML = `<p>${text}</p>`;
+	});
 	player.on('channelState', async channels => {
 		Object.keys(channels).map(async channel => programs[channel].setActive(channels[channel]));
 	});
@@ -212,7 +236,7 @@ class programChooser {
 	new DNDZone(document.querySelector('.dnd'), { onFileDrop: async file => {
 		if(!['mid', 'midi', 'kar'].includes(file.name.split('.').pop()?.toLowerCase()) || !file.size || file.size > 5242880) {
 			log('Error: Invalid file format.');
-			return
+			return;
 		}
 		document.querySelector('.controls').classList.add('disabled');
 		document.querySelector('.waveform').classList.add('disabled');

@@ -42,7 +42,7 @@ export default class AudioCompressor {
 
         lastNode.connect(this.#output);
         this.#output.connect(this.#limiter);
-        lastNode.connect(this.#reverbNode);
+        this.#output.connect(this.#reverbNode);
         this.#reverbNode.connect(this.#reverbWet);
         this.#limiter.connect(this.#analyser);
         this.#reverbWet.connect(this.#analyser);

@@ -1,5 +1,11 @@
+@charset "UTF-8";
 @import url("https://fonts.googleapis.com/css2?family=Rubik:ital,wght@0,300..900;1,300..900&display=block");
 @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=block");
+@property --light-opacity {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
 :root {
   --color-main: #ffa48d;
   --color-second: #fd3c84;
@@ -204,6 +210,7 @@ section:has(.dnd) > .dnd.show {
   --opacity: 0.8;
 }
 
+section:has(.karaoke),
 section:has(.instruments),
 section:has(.controls) {
   display: flex;
@@ -211,6 +218,41 @@ section:has(.controls) {
   align-items: center;
   flex-direction: column;
   row-gap: 1rem;
+}
+
+.karaoke {
+  position: relative;
+  display: flex;
+  padding: 1rem;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  width: 100%;
+  background-color: var(--color-pre);
+  line-height: 2.2rem;
+  min-height: 15rem;
+  user-select: none;
+  font-size: 1.1rem;
+  font-weight: 600;
+  text-shadow: 0 0 0.4rem black, 0 0 0.2rem black, 0 0 0.1rem black;
+}
+.karaoke .karaoke-intro::before {
+  content: "Karaoke🎤";
+  font-size: 3rem;
+}
+.karaoke .karaoke-clear::before {
+  content: "🎵";
+  font-size: 3rem;
+}
+.karaoke .karaoke-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+.karaoke .karaoke-played {
+  color: var(--color-second);
+}
+.karaoke .karaoke-playing {
+  color: var(--color-third);
 }
 
 .controls {
@@ -470,12 +512,7 @@ section:has(.controls) {
   position: absolute;
   inset: 0;
   background-color: var(--color-second);
-  opacity: 0;
-  transition: opacity 250ms ease-out;
-}
-.instruments > .instrument .light.active::after {
-  transition: opacity 5ms ease-in;
-  opacity: 1;
+  opacity: var(--light-opacity, 0);
 }
 .instruments > .instrument > select {
   width: 100%;
