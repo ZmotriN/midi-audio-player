@@ -83,7 +83,6 @@ class programChooser {
 			select.create('option', null, preset.name, { value: preset.id });
 		});
 		select.value = this.#selpreset;
-		// console.log();
 
 		container.create('div', 'program', `#${this.#channel}`);
 		this.#light = container.create('div', 'light');
@@ -117,8 +116,7 @@ class programChooser {
 
 
 (async () => {
-	const song = '../../data/closer.mid';
-	// const song = '../../data/screw.kar';
+	const song = '../../data/screw.kar';
 
 
 
@@ -192,10 +190,8 @@ class programChooser {
 		presetAuto: true,
 		localCache: true,
 		karaoke: true,
-		muteExpression: false,
-		trimSilences: true,
+		// muteExpression: true,
 		preferred: ["JCLive", "LesPaul", "Chaos"],
-		// presets: { [-1]: '12805_Chaos' }
 	});
 	player.on('endOfFile', async () => {
 		[btnpause, btnplay].forEach(btn => btn.classList.remove('active'));
@@ -206,18 +202,18 @@ class programChooser {
 	});
 	player.on('fileLoaded', async (data) => {
 		songInfos = data;
-		// console.log(songInfos);
+		document.querySelector('section > div.karaoke').style.setProperty('--title', `"${songInfos.title}"`);
 		log("Generating waveform...");
 		const svgCode = await player.generateWaveformSVG();
 		waveform.style.setProperty('--progress', `0%`);
 		waveform.style.setProperty('--time', `"0:00"`);
 		waveform.style.setProperty('--duration', `"${formatTime(songInfos.duration)}"`);
 		document.querySelector('.waveform__container').innerHTML = svgCode;
-		// console.log(await player.extractLyrics());
 	});
 	player.on('logs', str => log(str));
 	player.on('karaoke', evt => {
-		document.querySelector('section > div.karaoke').innerHTML = `<p>${evt.html}</p>`;
+		if(evt.type == 'title') return;
+		else document.querySelector('section > div.karaoke').innerHTML = `<p>${evt.html}</p>`;
 	});
 	player.on('channelState', async channels => {
 		Object.keys(channels).map(async channel => programs[channel].setActive(channels[channel]));
@@ -247,8 +243,6 @@ class programChooser {
 			const buffer = await file.arrayBuffer();
 			channels = await player.load(buffer);
 
-			await loadPrograms(channels, presets);
-
 
 			[btnpause, btnplay].forEach(btn => btn.classList.remove('active'));
 			btnstop.classList.add('active');
@@ -261,10 +255,14 @@ class programChooser {
 
 			[btnpause, btnstop].forEach(btn => btn.classList.remove('active'));
 			btnplay.classList.add('active');
-			player.play();
+
+			queueMicrotask(async () => {
+				await loadPrograms(channels, presets)
+				await player.play();
+				log('Automatic play');
+			});
 
 
-			log('Automatic play');
 		} catch(e) {
 			log('Error: Invalid file format');
 		}
@@ -305,7 +303,6 @@ class programChooser {
 					lasttime = time;
 				}
 			}
-
 			const vol = await player.getRealTimeVolume();
 			const indic = Math.ceil(vol * 36);
 			if(indic == lastmeter) return;
@@ -315,28 +312,15 @@ class programChooser {
 		});
 	}, 50);
 
-
-
 	log("Downloading song...");
 	const response = await fetch(song);
 	const buffer = await response.arrayBuffer();
 	channels = await player.load(buffer);
 	await loadPrograms(channels, presets);
 
-
-	
-	// log("----------------------------------------");
-	// log("██████╗ ███████╗ █████╗ ██████╗ ██╗   ██╗");
-	// log("██╔══██╗██╔════╝██╔══██╗██╔══██╗╚██╗ ██╔╝");
-	// log("██████╔╝█████╗  ███████║██║  ██║ ╚████╔╝");
-	// log("██╔══██╗██╔══╝  ██╔══██║██║  ██║  ╚██╔╝");
-	// log("██║  ██║███████╗██║  ██║██████╔╝   ██║");
-	// log("╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═════╝    ╚═╝");
 	log("----------------------------------------");
 	log("      Drag & drop your files here");
 	log("----------------------------------------");
-
-
 
 	document.querySelector('.controls').classList.remove('disabled');
 	document.querySelector('.waveform').classList.remove('disabled');

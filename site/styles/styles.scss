@@ -280,6 +280,7 @@ section:has(.controls) {
 
 
 .karaoke {
+	--title: "";
 	position: relative;
 	display: flex;
 	padding: 1rem;
@@ -296,19 +297,29 @@ section:has(.controls) {
 	font-weight: 600;
 	text-shadow: 0 0 0.4rem black, 0 0 0.2rem black, 0 0 0.1rem black;
 
+	&::before {
+		content: var(--title);
+		position: absolute;
+		bottom: 0.2rem;
+		right: 0.8rem;
+		text-shadow: none;
+		font-size: 0.6rem;
+		font-weight: 400;
+		opacity: 0.7;
+	}
+
 	.karaoke-intro::before {
 		content: "Karaoke🎤";
 		font-size: 3rem;
 	}
 
+	.karaoke-title {
+		display: none;
+	}
+
 	.karaoke-clear::before {
 		content: "🎵";
 		font-size: 3rem;
-	}
-
-	.karaoke-title {
-		font-size: 1.5rem;
-		font-weight: 700;
 	}
 
 	.karaoke-played {
