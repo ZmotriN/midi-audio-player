@@ -224,6 +224,7 @@ class programChooser {
 		const ratio = x / rect.width;
 		const finalRatio = Math.max(0, Math.min(1, ratio));
 		await player.skipToSeconds(songInfos.duration * finalRatio);
+		// console.log(player.getCurrentTick());
 		[btnpause, btnstop].forEach(btn => btn.classList.remove('active'));
 		btnplay.classList.add('active');
 		player.play();
@@ -259,7 +260,7 @@ class programChooser {
 			queueMicrotask(async () => {
 				await loadPrograms(channels, presets)
 				await player.play();
-				log('Automatic play');
+				log('Autoplay');
 			});
 
 
@@ -319,7 +320,7 @@ class programChooser {
 	await loadPrograms(channels, presets);
 
 	log("----------------------------------------");
-	log("      Drag & drop your files here");
+	log("|  Drag & drop your .kar or .mid here  |");
 	log("----------------------------------------");
 
 	document.querySelector('.controls').classList.remove('disabled');
