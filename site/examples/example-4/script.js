@@ -116,7 +116,7 @@ class programChooser {
 
 
 (async () => {
-	const song = '../../data/screw.kar';
+	const song = '../../data/closer.mid';
 
 
 
@@ -200,7 +200,7 @@ class programChooser {
 		waveform.style.setProperty('--time', `"0:00"`);
 		log("End of file");
 	});
-	player.on('fileLoaded', async (data) => {
+	player.on('computed', async (data) => {
 		songInfos = data;
 		document.querySelector('section > div.karaoke').style.setProperty('--title', `"${songInfos.title}"`);
 		log("Generating waveform...");
